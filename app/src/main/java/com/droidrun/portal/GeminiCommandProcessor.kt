@@ -12,7 +12,7 @@ import java.net.URL
 class GeminiCommandProcessor(private val context: Context) {
     private val TAG = "GeminiCommandProcessor"
     private val API_KEY = "AIzaSyDiThnIxTCQf0WV_DodhHbNpAHevqoWUZU"
-    private val API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent"
+    private val API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
     
     interface CommandCallback {
         fun onCommandProcessed(actions: List<UIAction>)
@@ -30,6 +30,7 @@ class GeminiCommandProcessor(private val context: Context) {
     
     fun processCommand(command: String, currentElements: String, callback: CommandCallback) {
         DebugLog.add(TAG, "Processing NL command: '$command'")
+        DebugLog.add(TAG, "Using Gemini API URL: $API_URL")
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val prompt = buildPrompt(command, currentElements)
