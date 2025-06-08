@@ -21,6 +21,7 @@ import com.google.android.material.textfield.TextInputLayout
 import android.provider.Settings
 import android.widget.ImageView
 import android.view.View
+import com.droidrun.portal.DebugMenuFragment
 
 class MainActivity : AppCompatActivity() {
     
@@ -37,10 +38,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var accessibilityStatusText: TextView
     private lateinit var accessibilityStatusContainer: View
     private lateinit var accessibilityStatusCard: com.google.android.material.card.MaterialCardView
+    private lateinit var headerCard: com.google.android.material.card.MaterialCardView
     
     // Flag to prevent infinite update loops
     private var isProgrammaticUpdate = false
     
+    // Properties for 5-tap gesture
+    private var tapCount = 0
+    private var lastTapTime: Long = 0
+    private val TAP_TIMEOUT = 500L // 500 milliseconds
+    private val REQUIRED_TAPS = 5
+
     // Constants for the position offset slider
     companion object {
         private const val DEFAULT_OFFSET = -128
@@ -111,6 +119,7 @@ class MainActivity : AppCompatActivity() {
         accessibilityStatusContainer = findViewById(R.id.accessibility_status_container)
         accessibilityStatusCard = findViewById(R.id.accessibility_status_card)
         launchVoiceCommandButton = findViewById(R.id.launch_voice_command_button)
+        headerCard = findViewById(R.id.header_card)
         
         // Configure the offset slider and input
         setupOffsetSlider()
@@ -144,6 +153,23 @@ class MainActivity : AppCompatActivity() {
         
         // Check initial accessibility status
         updateAccessibilityStatusIndicator()
+
+        headerCard.setOnClickListener {
+            val currentTime = System.currentTimeMillis()
+            if (currentTime - lastTapTime < TAP_TIMEOUT) {
+                tapCount++
+            } else {
+                tapCount = 1 // Reset if timeout or first tap
+            }
+            lastTapTime = currentTime
+
+            if (tapCount == REQUIRED_TAPS) {
+                tapCount = 0 // Reset after triggering
+                val debugMenu = DebugMenuFragment.newInstance(this)
+                debugMenu.show(supportFragmentManager, DebugMenuFragment.TAG)
+                Log.d("DROIDRUN_MAIN", "Debug menu gesture detected and fragment shown.")
+            }
+        }
     }
     
     override fun onResume() {
@@ -403,6 +429,25 @@ class MainActivity : AppCompatActivity() {
                 "Error opening accessibility settings",
                 Toast.LENGTH_SHORT
             ).show()
+        }
+    }
+
+    // Helper methods for DebugMenuFragment
+    fun isOverlayCurrentlyVisible(): Boolean {
+        return toggleOverlay.isChecked // 'toggleOverlay' is the SwitchMaterial in MainActivity
+    }
+
+    fun getCurrentOffset(): Int {
+        // Assuming offsetInput (TextInputEditText) holds the current authoritative value
+        return offsetInput.text.toString().toIntOrNull() ?: DEFAULT_OFFSET
+    }
+
+    fun toggleOverlayVisibilityExternally(show: Boolean) {
+        // This method allows the fragment to change the overlay state
+        // which will also update MainActivity's own 'toggleOverlay' switch
+        if (toggleOverlay.isChecked != show) {
+            toggleOverlay.isChecked = show
+            // The existing listener on toggleOverlay will call toggleOverlayVisibility(show)
         }
     }
 } 
