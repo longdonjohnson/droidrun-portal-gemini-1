@@ -430,16 +430,16 @@ class DroidrunPortalService : AccessibilityService() {
             node.getBoundsInScreen(rect)
             
             if (rect.width() >= MIN_ELEMENT_SIZE && rect.height() >= MIN_ELEMENT_SIZE) {
+                val classNameStr = node.className?.toString() ?: ""
+                val textStr = node.text?.toString() ?: ""
                 val element = ElementNode(
+                    nodeInfo = node,
                     rect = rect,
-                    text = node.text?.toString() ?: "",
-                    className = node.className?.toString() ?: "",
-                    isClickable = node.isClickable,
-                    isCheckable = node.isCheckable,
-                    isEditable = node.isEditable,
-                    isScrollable = node.isScrollable,
-                    isFocusable = node.isFocusable,
-                    windowLayer = depth
+                    text = textStr,
+                    className = classNameStr,
+                    windowLayer = depth,
+                    creationTime = System.currentTimeMillis(),
+                    id = ElementNode.createId(rect, classNameStr, textStr)
                 )
                 elements.add(element)
             }
@@ -460,7 +460,7 @@ class DroidrunPortalService : AccessibilityService() {
             if (includeAll) {
                 visibleElements.toList()
             } else {
-                visibleElements.filter { it.isClickable || it.isCheckable || it.isEditable || it.isScrollable || it.isFocusable }
+                visibleElements.filter { it.isClickable() || it.nodeInfo.isCheckable || it.nodeInfo.isEditable || it.nodeInfo.isScrollable || it.nodeInfo.isFocusable }
             }
         }
         
@@ -469,11 +469,11 @@ class DroidrunPortalService : AccessibilityService() {
                 put("index", index)
                 put("text", element.text)
                 put("class", element.className)
-                put("clickable", element.isClickable)
-                put("checkable", element.isCheckable)
-                put("editable", element.isEditable)
-                put("scrollable", element.isScrollable)
-                put("focusable", element.isFocusable)
+                put("clickable", element.isClickable())
+                put("checkable", element.nodeInfo.isCheckable)
+                put("editable", element.nodeInfo.isEditable)
+                put("scrollable", element.nodeInfo.isScrollable)
+                put("focusable", element.nodeInfo.isFocusable)
                 put("bounds", JSONObject().apply {
                     put("left", element.rect.left)
                     put("top", element.rect.top)
