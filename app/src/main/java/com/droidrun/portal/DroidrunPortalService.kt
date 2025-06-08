@@ -24,6 +24,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.LinkedList // Added
 import kotlin.math.abs
 
 class DroidrunPortalService : AccessibilityService() {
@@ -71,6 +72,14 @@ class DroidrunPortalService : AccessibilityService() {
     private var currentPackageName: String = "" // Track current app package
     private var overlayVisible = true // Track if overlay is visible
     
+    // Variables for multi-step command processing
+    private var currentOriginalCommand: String? = null
+    private var isProcessingMultiStep: Boolean = false
+    private var lastKnownUiContext: String? = null
+    private val pendingActionsQueue: java.util.LinkedList<GeminiCommandProcessor.UIAction> = java.util.LinkedList()
+    private val MAX_REPROMPT_ATTEMPTS = 5
+    private var currentRepromptAttempts = 0
+
     // Track currently displayed elements (after filtering)
     private val displayedElements = mutableListOf<Pair<ElementNode, Float>>()
     
@@ -206,19 +215,186 @@ class DroidrunPortalService : AccessibilityService() {
 
     // Gemini Integration Methods
     private fun processNaturalLanguageCommand(command: String) {
-        Log.d(TAG, "Processing natural language command: $command")
-        val currentElements = getCurrentElementsJson()
+        DebugLog.add(TAG, "New LPN command received: '$command'")
+        if (isProcessingMultiStep) {
+            DebugLog.add(TAG, "Warning: New command received while already processing a multi-step command ('${currentOriginalCommand}'). Overwriting.")
+            // Optionally, you might want to queue commands or disallow new ones until current finishes.
+            // For now, a new command interrupts and replaces the old one.
+        }
+
+        currentOriginalCommand = command
+        isProcessingMultiStep = true
+        pendingActionsQueue.clear() // Clear any actions from a previous command
+        currentRepromptAttempts = 0 // Reset re-prompt counter
+
+        val currentElementsJson = getCurrentElementsJson()
+        lastKnownUiContext = currentElementsJson // Store context used for this command cycle
+
+        DebugLog.add(TAG, "Initiating Gemini processing for: '$command'")
+        geminiProcessor.processCommand(
+            command,
+            currentElementsJson,
+            object : GeminiCommandProcessor.CommandCallback {
+                override fun onActionsReady(actions: List<GeminiCommandProcessor.UIAction>, forCommand: String, uiContextUsed: String) {
+                    handleGeminiActions(actions, forCommand, uiContextUsed)
+                }
+
+                override fun onError(error: String) {
+                    DebugLog.add(TAG, "Gemini processing error for '$command': $error")
+                    isProcessingMultiStep = false
+                    currentOriginalCommand = null
+                }
+            }
+        )
+    }
+
+    private fun handleGeminiActions(actions: List<GeminiCommandProcessor.UIAction>, forCommand: String, uiContextUsed: String) {
+        DebugLog.add(TAG, "Gemini actions ready for command '$forCommand' (UI context hash: ${uiContextUsed.hashCode()}): ${actions.size} actions.")
+        if (!isProcessingMultiStep || forCommand != currentOriginalCommand) {
+            DebugLog.add(TAG, "Ignoring stale actions. Current command is '${currentOriginalCommand}'. Actions were for '${forCommand}'.")
+            return
+        }
+
+        if (actions.isEmpty()) {
+            DebugLog.add(TAG, "Gemini returned no actions for '$forCommand'. Considering this step complete or stuck.")
+            // Check if we should stop or re-prompt
+            if (currentRepromptAttempts >= MAX_REPROMPT_ATTEMPTS) {
+                DebugLog.add(TAG, "Max re-prompt attempts reached. Ending multi-step command.")
+                isProcessingMultiStep = false
+                currentOriginalCommand = null
+            } else {
+                DebugLog.add(TAG, "No actions, attempting re-prompt (attempt ${currentRepromptAttempts + 1}).")
+                currentRepromptAttempts++ // Increment before calling continue
+                mainHandler.postDelayed({ continueMultiStepCommand() }, 1000) // Delay before re-prompting
+            }
+            return
+        }
+
+        // Check for "finish" action
+        val finishAction = actions.firstOrNull { it.type.equals("finish", ignoreCase = true) }
+        if (finishAction != null) {
+            DebugLog.add(TAG, "Received 'finish' action. Multi-step command completed.")
+            isProcessingMultiStep = false
+            currentOriginalCommand = null
+            pendingActionsQueue.clear()
+            return
+        }
+
+        pendingActionsQueue.addAll(actions)
+        DebugLog.add(TAG, "Added ${actions.size} actions to queue. Total queue size: ${pendingActionsQueue.size}")
+
+        // If not already processing (e.g. first set of actions), start processing queue.
+        // Or if it was processing, this might be a new set of actions from a re-prompt.
+        executeNextPendingAction()
+    }
+
+    private fun executeNextPendingAction() {
+        if (!isProcessingMultiStep) {
+            DebugLog.add(TAG, "executeNextPendingAction called but not processing multi-step.")
+            pendingActionsQueue.clear()
+            return
+        }
+
+        if (pendingActionsQueue.isEmpty()) {
+            DebugLog.add(TAG, "Action queue is empty. Need to re-prompt for '$currentOriginalCommand'.")
+            // This state should ideally be caught by handleGeminiActions or lead to continueMultiStepCommand for re-prompt
+            if (currentRepromptAttempts < MAX_REPROMPT_ATTEMPTS) {
+                 DebugLog.add(TAG, "Queue empty, attempting re-prompt (attempt ${currentRepromptAttempts + 1}).")
+                 currentRepromptAttempts++
+                 mainHandler.postDelayed({ continueMultiStepCommand() }, 1000)
+            } else {
+                DebugLog.add(TAG, "Max re-prompt attempts reached and queue empty. Ending multi-step command.")
+                isProcessingMultiStep = false
+                currentOriginalCommand = null
+            }
+            return
+        }
+
+        val nextAction = pendingActionsQueue.removeFirst()
+        DebugLog.add(TAG, "Executing next action from queue: ${nextAction.type}. Remaining in queue: ${pendingActionsQueue.size}")
         
-        geminiProcessor.processCommand(command, currentElements, object : GeminiCommandProcessor.CommandCallback {
-            override fun onCommandProcessed(actions: List<GeminiCommandProcessor.UIAction>) {
-                Log.d(TAG, "Received ${actions.size} actions from Gemini")
-                executeActions(actions)
+        // Clear the rest of pendingActionsQueue to force re-evaluation after this single action
+        // This ensures we always get fresh context from Gemini after every discrete step.
+        pendingActionsQueue.clear()
+        DebugLog.add(TAG, "Cleared pending actions queue to force re-evaluation after this action.")
+
+        executeAction(nextAction)
+
+        // After action execution, schedule continuation (which will re-prompt due to empty queue)
+        mainHandler.postDelayed({
+            if (isProcessingMultiStep) {
+                // Since queue is now empty, this will trigger re-prompt logic in continueMultiStepCommand
+                // or the start of executeNextPendingAction.
+                // For clarity, directly call continueMultiStepCommand for re-prompt.
+                if (currentRepromptAttempts < MAX_REPROMPT_ATTEMPTS) {
+                    DebugLog.add(TAG, "Action executed. Re-prompting (attempt ${currentRepromptAttempts + 1}).")
+                    currentRepromptAttempts++
+                    continueMultiStepCommand() // Call directly, no need for another postDelayed here if continueMultiStepCommand handles its own async call to Gemini
+                } else {
+                    DebugLog.add(TAG, "Max re-prompt attempts reached after action. Ending multi-step command.")
+                    isProcessingMultiStep = false
+                    currentOriginalCommand = null
+                }
             }
-            
-            override fun onError(error: String) {
-                Log.e(TAG, "Gemini processing error: $error")
+        }, 1000) // 1 second delay for UI to settle
+    }
+
+    private fun continueMultiStepCommand() {
+        DebugLog.add(TAG, "continueMultiStepCommand called. Current original command: '$currentOriginalCommand', isProcessing: $isProcessingMultiStep, Reprompt attempt: $currentRepromptAttempts / $MAX_REPROMPT_ATTEMPTS")
+
+        if (!isProcessingMultiStep) {
+            DebugLog.add(TAG, "Not in multi-step processing mode. Aborting continueMultiStepCommand.")
+            currentOriginalCommand = null // Ensure it's cleared
+            pendingActionsQueue.clear()
+            return
+        }
+
+        if (currentOriginalCommand == null) {
+            DebugLog.add(TAG, "Error: continueMultiStepCommand called with no original command. Aborting.")
+            isProcessingMultiStep = false
+            pendingActionsQueue.clear()
+            return
+        }
+
+        // Refresh UI context
+        // Note: processActiveWindow() updates visibleElements, getCurrentElementsJson() uses it.
+        // This needs to be on main thread if processActiveWindow() has UI interactions or specific thread requirements.
+        // For now, assuming it can be called here. If issues, may need to wrap in mainHandler.post.
+        processActiveWindow() // Make sure this captures the latest screen
+        val newUiContext = getCurrentElementsJson()
+
+        DebugLog.add(TAG, "New UI context captured (hash: ${newUiContext.hashCode()}). Comparing with last (hash: ${lastKnownUiContext?.hashCode()}).")
+
+        // Basic check to prevent loops if UI isn't changing and Gemini isn't finishing.
+        // More sophisticated checks could be added (e.g., if newUiContext is identical to lastKnownUiContext for X retries).
+        if (newUiContext == lastKnownUiContext && pendingActionsQueue.isEmpty()) {
+            // If UI is same and queue was emptied (meaning previous Gemini response didn't yield useful actions or finished its batch)
+            // This check is tricky; if an action *did* happen, UI *should* change. If it didn't, we might be stuck.
+            // The MAX_REPROMPT_ATTEMPTS should primarily handle infinite loops.
+            // This specific check might be too aggressive if Gemini legitimately returns no actions for a state.
+            // For now, primary reliance is on MAX_REPROMPT_ATTEMPTS managed in executeNextPendingAction/handleGeminiActions.
+            DebugLog.add(TAG, "UI context appears unchanged and queue is empty. Relying on MAX_REPROMPT_ATTEMPTS to break loops.")
+        }
+
+        lastKnownUiContext = newUiContext // Update for the next cycle
+
+        DebugLog.add(TAG, "Re-prompting Gemini for original command: '$currentOriginalCommand' with new UI context.")
+        geminiProcessor.processCommand(
+            currentOriginalCommand!!, // Known not null due to check above
+            newUiContext,
+            object : GeminiCommandProcessor.CommandCallback {
+                override fun onActionsReady(actions: List<GeminiCommandProcessor.UIAction>, forCommand: String, uiContextUsed: String) {
+                    handleGeminiActions(actions, forCommand, uiContextUsed)
+                }
+
+                override fun onError(error: String) {
+                    DebugLog.add(TAG, "Gemini processing error during continuation for '$currentOriginalCommand': $error")
+                    // Decide if we should stop or retry. For now, stop.
+                    isProcessingMultiStep = false
+                    currentOriginalCommand = null
+                }
             }
-        })
+        )
     }
     
     private fun processVoiceCommand(command: String) {
@@ -226,12 +402,12 @@ class DroidrunPortalService : AccessibilityService() {
         processNaturalLanguageCommand(command)
     }
     
-    private fun executeActions(actions: List<GeminiCommandProcessor.UIAction>) {
-        for (action in actions) {
-            executeAction(action)
-            Thread.sleep(500) // Small delay between actions
-        }
-    }
+    // private fun executeActions(actions: List<GeminiCommandProcessor.UIAction>) { // Replaced by queue processing
+    //     for (action in actions) {
+    //         executeAction(action)
+    //         Thread.sleep(500) // Small delay between actions
+    //     }
+    // }
     
     private fun executeAction(action: GeminiCommandProcessor.UIAction) {
         DebugLog.add(TAG, "Executing action: Type=${action.type}, Index=${action.elementIndex}, Text='${action.text}', XY=(${action.x},${action.y}), Dir='${action.direction}'")

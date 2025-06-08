@@ -15,7 +15,7 @@ class GeminiCommandProcessor(private val context: Context) {
     private val API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
     
     interface CommandCallback {
-        fun onCommandProcessed(actions: List<UIAction>)
+        fun onActionsReady(actions: List<UIAction>, forCommand: String, uiContextUsed: String)
         fun onError(error: String)
     }
     
@@ -39,7 +39,7 @@ class GeminiCommandProcessor(private val context: Context) {
                 val actions = parseResponse(response)
                 
                 withContext(Dispatchers.Main) {
-                    callback.onCommandProcessed(actions)
+                    callback.onActionsReady(actions, command, currentElements)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing command", e)
@@ -72,7 +72,9 @@ Examples:
 - To scroll down: [{"type":"scroll","direction":"down"}]
 - To go home: [{"type":"home"}]
 
-Respond only with the JSON array, no other text.
+Respond only with the JSON array of actions.
+If the original command is now complete based on the current UI, respond with only the single action: {"type":"finish"}
+Do not add any other text outside the JSON response.
         """.trimIndent()
     }
     
