@@ -261,6 +261,19 @@
                                 app:elevation="4dp" />
                         </LinearLayout>
 
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/launch_voice_command_button"
+                            android:layout_width="match_parent"
+                            android:layout_height="56dp"
+                            android:layout_marginTop="8dp"
+                            android:text="Voice Command"
+                            android:textColor="@color/white"
+                            app:icon="@android:drawable/ic_btn_speak_now"
+                            app:iconTint="@color/white"
+                            app:backgroundTint="@color/droidrun_primary"
+                            app:cornerRadius="12dp"
+                            app:elevation="4dp" />
+
                         <com.google.android.material.card.MaterialCardView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"

@@ -32,6 +32,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var offsetSlider: SeekBar
     private lateinit var offsetInput: TextInputEditText
     private lateinit var offsetInputLayout: TextInputLayout
+    private lateinit var launchVoiceCommandButton: MaterialButton
     private lateinit var accessibilityIndicator: View
     private lateinit var accessibilityStatusText: TextView
     private lateinit var accessibilityStatusContainer: View
@@ -109,6 +110,7 @@ class MainActivity : AppCompatActivity() {
         accessibilityStatusText = findViewById(R.id.accessibility_status_text)
         accessibilityStatusContainer = findViewById(R.id.accessibility_status_container)
         accessibilityStatusCard = findViewById(R.id.accessibility_status_card)
+        launchVoiceCommandButton = findViewById(R.id.launch_voice_command_button)
         
         // Configure the offset slider and input
         setupOffsetSlider()
@@ -130,6 +132,11 @@ class MainActivity : AppCompatActivity() {
             toggleOverlayVisibility(isChecked)
         }
         
+        launchVoiceCommandButton.setOnClickListener {
+            val intent = Intent(this, VoiceCommandActivity::class.java)
+            startActivity(intent)
+        }
+
         // Setup accessibility status container
         accessibilityStatusContainer.setOnClickListener {
             openAccessibilitySettings()
