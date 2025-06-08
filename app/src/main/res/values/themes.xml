@@ -1,0 +1,86 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Theme.Droidrun" parent="Theme.MaterialComponents.NoActionBar">
+        <!-- Primary brand color. -->
+        <item name="colorPrimary">@color/droidrun_primary</item>
+        <item name="colorPrimaryVariant">@color/droidrun_primary_dark</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <!-- Secondary brand color. -->
+        <item name="colorSecondary">@color/droidrun_secondary</item>
+        <item name="colorSecondaryVariant">@color/droidrun_accent</item>
+        <item name="colorOnSecondary">@color/white</item>
+        <!-- Status bar color. -->
+        <item name="android:statusBarColor">@color/black</item>
+        <!-- Background colors -->
+        <item name="android:colorBackground">#1A1E1C</item>
+        <item name="colorSurface">#252A27</item>
+        <item name="colorOnSurface">@color/white</item>
+        <!-- Text colors -->
+        <item name="android:textColorPrimary">@color/white</item>
+        <item name="android:textColorSecondary">#A6E9CE</item>
+        <item name="android:textColorHint">#78CAB0</item>
+        <!-- Ripple effect -->
+        <item name="colorControlHighlight">@color/droidrun_ripple</item>
+        <!-- Card style -->
+        <item name="materialCardViewStyle">@style/Widget.Droidrun.CardView</item>
+        <!-- Button style -->
+        <item name="materialButtonStyle">@style/Widget.Droidrun.Button</item>
+        <!-- Switch style -->
+        <item name="switchStyle">@style/Widget.Droidrun.Switch</item>
+        <!-- TextInputLayout style -->
+        <item name="textInputStyle">@style/Widget.Droidrun.TextInputLayout</item>
+        <!-- SeekBar style -->
+        <item name="android:seekBarStyle">@style/Widget.Droidrun.SeekBar</item>
+        <!-- Enable window content transitions -->
+        <item name="android:windowActivityTransitions">true</item>
+        <item name="android:windowEnterTransition">@android:transition/fade</item>
+        <item name="android:windowExitTransition">@android:transition/fade</item>
+    </style>
+    
+    <style name="Widget.Droidrun.CardView" parent="Widget.MaterialComponents.CardView">
+        <item name="cardElevation">4dp</item>
+        <item name="cardCornerRadius">16dp</item>
+        <item name="cardBackgroundColor">#2A332F</item>
+        <item name="rippleColor">@color/droidrun_ripple</item>
+        <item name="cardPreventCornerOverlap">true</item>
+        <item name="contentPadding">0dp</item>
+    </style>
+    
+    <style name="Widget.Droidrun.Button" parent="Widget.MaterialComponents.Button">
+        <item name="cornerRadius">12dp</item>
+        <item name="android:textColor">@color/white</item>
+        <item name="backgroundTint">@color/droidrun_primary</item>
+        <item name="rippleColor">@color/droidrun_ripple</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:letterSpacing">0.01</item>
+        <item name="android:paddingTop">12dp</item>
+        <item name="android:paddingBottom">12dp</item>
+        <item name="elevation">4dp</item>
+        <item name="android:textAllCaps">false</item>
+    </style>
+
+    <style name="Widget.Droidrun.Switch" parent="Widget.MaterialComponents.CompoundButton.Switch">
+        <item name="thumbTint">@color/droidrun_primary</item>
+        <item name="trackTint">@color/droidrun_primary_light</item>
+    </style>
+
+    <style name="Widget.Droidrun.TextInputLayout" parent="Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+        <item name="boxStrokeColor">@color/droidrun_primary</item>
+        <item name="boxStrokeWidth">1dp</item>
+        <item name="cornerRadius">12dp</item>
+        <item name="hintTextColor">@color/droidrun_primary</item>
+        <item name="android:textColorHint">@color/droidrun_text_secondary</item>
+        <item name="endIconTint">@color/droidrun_primary</item>
+        <item name="boxBackgroundColor">#2A332F</item>
+    </style>
+
+    <style name="Widget.Droidrun.SeekBar" parent="Widget.AppCompat.SeekBar">
+        <item name="android:progressTint">@color/droidrun_primary</item>
+        <item name="android:thumbTint">@color/droidrun_primary</item>
+        <item name="android:progressBackgroundTint">@color/droidrun_divider</item>
+        <item name="android:minHeight">4dp</item>
+        <item name="android:maxHeight">4dp</item>
+        <item name="android:paddingStart">0dp</item>
+        <item name="android:paddingEnd">0dp</item>
+    </style>
+</resources>

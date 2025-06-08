@@ -1,0 +1,29 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Theme.Droidrun" parent="Theme.MaterialComponents.NoActionBar">
+        <!-- Primary brand color. -->
+        <item name="colorPrimary">@color/droidrun_primary_light</item>
+        <item name="colorPrimaryVariant">@color/droidrun_primary</item>
+        <item name="colorOnPrimary">@color/black</item>
+        <!-- Secondary brand color. -->
+        <item name="colorSecondary">@color/droidrun_accent</item>
+        <item name="colorSecondaryVariant">@color/droidrun_secondary</item>
+        <item name="colorOnSecondary">@color/black</item>
+        <!-- Status bar color. -->
+        <item name="android:statusBarColor">@color/black</item>
+        <!-- Background colors -->
+        <item name="android:colorBackground">#1A1E1C</item>
+        <item name="colorSurface">#252A27</item>
+        <item name="colorOnSurface">@color/white</item>
+        <!-- Text colors -->
+        <item name="android:textColorPrimary">@color/white</item>
+        <item name="android:textColorSecondary">#A6E9CE</item>
+        <item name="android:textColorHint">#78CAB0</item>
+        <!-- Ripple effect -->
+        <item name="colorControlHighlight">#3300E5B9</item>
+        <!-- Enable window content transitions -->
+        <item name="android:windowActivityTransitions">true</item>
+        <item name="android:windowEnterTransition">@android:transition/fade</item>
+        <item name="android:windowExitTransition">@android:transition/fade</item>
+    </style>
+</resources>

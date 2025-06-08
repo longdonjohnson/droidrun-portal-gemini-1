@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.droidrun.portal">
+
+    <!-- Permission to draw over other apps -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    
+    <!-- Gemini integration permissions -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    
+    <!-- Define a custom permission for secure broadcast communication -->
+    <permission
+        android:name="com.droidrun.portal.SEND_INPUT_DATA"
+        android:protectionLevel="signature" />
+    
+    <!-- Use our custom permission -->
+    <uses-permission android:name="com.droidrun.portal.SEND_INPUT_DATA" />
+
+    <application
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Droidrun"
+        tools:targetApi="31">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Voice Command Activity -->
+        <activity
+            android:name=".VoiceCommandActivity"
+            android:label="Voice Command"
+            android:theme="@android:style/Theme.Dialog"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".DroidrunPortalService"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- Keyboard Input Method Service -->
+        <service
+            android:name=".DroidrunKeyboardIME"
+            android:label="@string/keyboard_name"
+            android:permission="android.permission.BIND_INPUT_METHOD"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/method" />
+        </service>
+
+        <receiver
+            android:name=".PortalBroadcastReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.droidrun.portal.DROIDRUN_INPUT_B64"/>
+                <action android:name="com.droidrun.portal.NATURAL_LANGUAGE_COMMAND" />
+                <action android:name="com.droidrun.portal.VOICE_COMMAND" />
+                <action android:name="com.droidrun.portal.EXECUTE_ACTION" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+</manifest>
+
