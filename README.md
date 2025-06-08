@@ -62,7 +62,7 @@ adb shell am broadcast -a com.droidrun.portal.GET_ELEMENTS
 ### API Key
 The Gemini API key is hardcoded in `GeminiCommandProcessor.kt`:
 ```kotlin
-private val API_KEY = <apikey>"
+private val API_KEY = "AIzaSyDiThnIxTCQf0WV_DodhHbNpAHevqoWUZU"
 ```
 
 ### Dependencies Added
