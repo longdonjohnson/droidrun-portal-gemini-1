@@ -21,25 +21,35 @@ import com.google.android.material.textfield.TextInputLayout
 import android.provider.Settings
 import android.widget.ImageView
 import android.view.View
+import com.droidrun.portal.DebugMenuFragment
 
 class MainActivity : AppCompatActivity() {
     
     private lateinit var statusText: TextView
     private lateinit var responseText: TextView
-    private lateinit var toggleOverlay: SwitchMaterial
+    // private lateinit var toggleOverlay: SwitchMaterial // Removed
     private lateinit var fetchButton: MaterialButton
     private lateinit var retriggerButton: MaterialButton
     private lateinit var offsetSlider: SeekBar
     private lateinit var offsetInput: TextInputEditText
     private lateinit var offsetInputLayout: TextInputLayout
+    private lateinit var launchVoiceCommandButton: MaterialButton
     private lateinit var accessibilityIndicator: View
     private lateinit var accessibilityStatusText: TextView
     private lateinit var accessibilityStatusContainer: View
     private lateinit var accessibilityStatusCard: com.google.android.material.card.MaterialCardView
+    private lateinit var headerCard: com.google.android.material.card.MaterialCardView
     
     // Flag to prevent infinite update loops
     private var isProgrammaticUpdate = false
-    
+    private var isOverlayActuallyVisibleState: Boolean = true // Added
+
+    // Properties for 5-tap gesture
+    private var tapCount = 0
+    private var lastTapTime: Long = 0
+    private val TAP_TIMEOUT = 500L // 500 milliseconds
+    private val REQUIRED_TAPS = 5
+
     // Constants for the position offset slider
     companion object {
         private const val DEFAULT_OFFSET = -128
@@ -77,10 +87,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 
                 // Handle overlay toggle status
-                if (intent.hasExtra("overlay_status")) {
-                    val overlayVisible = intent.getBooleanExtra("overlay_status", true)
-                    toggleOverlay.isChecked = overlayVisible
-                }
+                // if (intent.hasExtra("overlay_status")) { // Commented out/Removed
+                //     val overlayVisible = intent.getBooleanExtra("overlay_status", true)
+                //     // toggleOverlay.isChecked = overlayVisible // toggleOverlay is removed
+                // }
                 
                 // Handle position offset response
                 if (intent.hasExtra("current_offset")) {
@@ -101,7 +111,7 @@ class MainActivity : AppCompatActivity() {
         responseText = findViewById(R.id.response_text)
         fetchButton = findViewById(R.id.fetch_button)
         retriggerButton = findViewById(R.id.retrigger_button)
-        toggleOverlay = findViewById(R.id.toggle_overlay)
+        // toggleOverlay = findViewById(R.id.toggle_overlay) // Removed
         offsetSlider = findViewById(R.id.offset_slider)
         offsetInput = findViewById(R.id.offset_input)
         offsetInputLayout = findViewById(R.id.offset_input_layout)
@@ -109,6 +119,8 @@ class MainActivity : AppCompatActivity() {
         accessibilityStatusText = findViewById(R.id.accessibility_status_text)
         accessibilityStatusContainer = findViewById(R.id.accessibility_status_container)
         accessibilityStatusCard = findViewById(R.id.accessibility_status_card)
+        launchVoiceCommandButton = findViewById(R.id.launch_voice_command_button)
+        headerCard = findViewById(R.id.header_card)
         
         // Configure the offset slider and input
         setupOffsetSlider()
@@ -126,10 +138,15 @@ class MainActivity : AppCompatActivity() {
             retriggerElements()
         }
         
-        toggleOverlay.setOnCheckedChangeListener { _, isChecked ->
-            toggleOverlayVisibility(isChecked)
+        // toggleOverlay.setOnCheckedChangeListener { _, isChecked -> // Removed
+        //     toggleOverlayVisibility(isChecked)
+        // }
+
+        launchVoiceCommandButton.setOnClickListener {
+            val intent = Intent(this, VoiceCommandActivity::class.java)
+            startActivity(intent)
         }
-        
+
         // Setup accessibility status container
         accessibilityStatusContainer.setOnClickListener {
             openAccessibilitySettings()
@@ -137,6 +154,23 @@ class MainActivity : AppCompatActivity() {
         
         // Check initial accessibility status
         updateAccessibilityStatusIndicator()
+
+        headerCard.setOnClickListener {
+            val currentTime = System.currentTimeMillis()
+            if (currentTime - lastTapTime < TAP_TIMEOUT) {
+                tapCount++
+            } else {
+                tapCount = 1 // Reset if timeout or first tap
+            }
+            lastTapTime = currentTime
+
+            if (tapCount == REQUIRED_TAPS) {
+                tapCount = 0 // Reset after triggering
+                val debugMenu = DebugMenuFragment.newInstance(this)
+                debugMenu.show(supportFragmentManager, DebugMenuFragment.TAG)
+                Log.d("DROIDRUN_MAIN", "Debug menu gesture detected and fragment shown.")
+            }
+        }
     }
     
     override fun onResume() {
@@ -318,6 +352,7 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun toggleOverlayVisibility(visible: Boolean) {
+        isOverlayActuallyVisibleState = visible // Added
         try {
             val intent = Intent(DroidrunPortalService.ACTION_TOGGLE_OVERLAY).apply {
                 putExtra(DroidrunPortalService.EXTRA_OVERLAY_VISIBLE, visible)
@@ -397,5 +432,20 @@ class MainActivity : AppCompatActivity() {
                 Toast.LENGTH_SHORT
             ).show()
         }
+    }
+
+    // Helper methods for DebugMenuFragment
+    fun isOverlayCurrentlyVisible(): Boolean {
+        return isOverlayActuallyVisibleState
+    }
+
+    fun getCurrentOffset(): Int {
+        // Assuming offsetInput (TextInputEditText) holds the current authoritative value
+        return offsetInput.text.toString().toIntOrNull() ?: DEFAULT_OFFSET
+    }
+
+    fun toggleOverlayVisibilityExternally(show: Boolean) {
+        // Call the original method that handles the broadcast to the service
+        toggleOverlayVisibility(show)
     }
 } 
