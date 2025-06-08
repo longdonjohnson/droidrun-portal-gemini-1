@@ -8,12 +8,16 @@ import android.widget.Button
 import androidx.fragment.app.DialogFragment
 import com.google.android.material.switchmaterial.SwitchMaterial // Added
 import android.widget.TextView // Added
+import android.text.method.ScrollingMovementMethod // Added
 
 class DebugMenuFragment : DialogFragment() {
 
     private var mainActivityInstance: MainActivity? = null
     private lateinit var overlayToggle: SwitchMaterial
     private lateinit var offsetValueText: TextView
+    private lateinit var logTextView: TextView
+    private lateinit var refreshLogsButton: Button
+    private lateinit var clearLogsButton: Button
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -29,6 +33,11 @@ class DebugMenuFragment : DialogFragment() {
         overlayToggle = view.findViewById(R.id.debug_menu_overlay_toggle)
         offsetValueText = view.findViewById(R.id.debug_menu_offset_value)
         val closeButton: Button = view.findViewById(R.id.debug_menu_close_button)
+        logTextView = view.findViewById(R.id.debug_menu_log_textview)
+        refreshLogsButton = view.findViewById(R.id.debug_menu_refresh_logs_button)
+        clearLogsButton = view.findViewById(R.id.debug_menu_clear_logs_button)
+
+        logTextView.movementMethod = ScrollingMovementMethod()
 
         closeButton.setOnClickListener {
             dismiss()
@@ -45,6 +54,26 @@ class DebugMenuFragment : DialogFragment() {
             overlayToggle.setOnCheckedChangeListener { _, isChecked ->
                 activity.toggleOverlayVisibilityExternally(isChecked)
             }
+        }
+
+        refreshLogsButton.setOnClickListener {
+            refreshLogView()
+        }
+
+        clearLogsButton.setOnClickListener {
+            DebugLog.clearLogs()
+            refreshLogView()
+        }
+
+        refreshLogView() // Initial population
+    }
+
+    private fun refreshLogView() {
+        if (::logTextView.isInitialized) { // Check if logTextView has been initialized
+            val logs = DebugLog.getLogs()
+            logTextView.text = if (logs.isEmpty()) "No logs yet." else logs.joinToString("\n")
+            // Optional: Scroll to bottom, but might be complex with nested ScrollView
+            // For now, simple text set is fine. Android TextView with scrollbars will handle it.
         }
     }
 

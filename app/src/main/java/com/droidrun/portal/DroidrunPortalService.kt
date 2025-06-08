@@ -1,5 +1,6 @@
 package com.droidrun.portal
 
+import com.droidrun.portal.DebugLog // Added
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Rect
@@ -89,6 +90,7 @@ class DroidrunPortalService : AccessibilityService() {
                     when (intent.action) {
                         "com.droidrun.portal.PROCESS_NL_COMMAND" -> {
                             val command = intent.getStringExtra("command")
+                            DebugLog.add(TAG, "Service received PROCESS_NL_COMMAND: '$command'")
                             if (command != null) {
                                 processNaturalLanguageCommand(command)
                             }
@@ -232,6 +234,7 @@ class DroidrunPortalService : AccessibilityService() {
     }
     
     private fun executeAction(action: GeminiCommandProcessor.UIAction) {
+        DebugLog.add(TAG, "Executing action: Type=${action.type}, Index=${action.elementIndex}, Text='${action.text}', XY=(${action.x},${action.y}), Dir='${action.direction}'")
         when (action.type) {
             "click" -> {
                 if (action.elementIndex >= 0) {
@@ -253,12 +256,15 @@ class DroidrunPortalService : AccessibilityService() {
             }
             "home" -> {
                 performGlobalAction(GLOBAL_ACTION_HOME)
+                DebugLog.add(TAG, "Performed global action: HOME.")
             }
             "back" -> {
                 performGlobalAction(GLOBAL_ACTION_BACK)
+                DebugLog.add(TAG, "Performed global action: BACK.")
             }
             "recent" -> {
                 performGlobalAction(GLOBAL_ACTION_RECENTS)
+                DebugLog.add(TAG, "Performed global action: RECENTS.")
             }
         }
     }
@@ -281,6 +287,9 @@ class DroidrunPortalService : AccessibilityService() {
             val element = elements[index]
             element.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             Log.d(TAG, "Clicked element at index $index")
+            DebugLog.add(TAG, "Clicked element at index $index successfully.")
+        } else {
+            DebugLog.add(TAG, "Failed to click: Element index $index out of bounds (size: ${elements.size}).")
         }
     }
     
@@ -306,6 +315,9 @@ class DroidrunPortalService : AccessibilityService() {
             }
             element.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
             Log.d(TAG, "Typed '$text' in element at index $index")
+            DebugLog.add(TAG, "Typed '$text' in element at index $index successfully.")
+        } else {
+            DebugLog.add(TAG, "Failed to type: Element index $index out of bounds (size: ${elements.size}).")
         }
     }
     
@@ -318,6 +330,7 @@ class DroidrunPortalService : AccessibilityService() {
         
         rootInActiveWindow?.performAction(action)
         Log.d(TAG, "Performed scroll $direction")
+        DebugLog.add(TAG, "Performed scroll $direction.")
     }
     
     private fun performSwipe(direction: String) {
@@ -351,6 +364,7 @@ class DroidrunPortalService : AccessibilityService() {
             
         dispatchGesture(gesture, null, null)
         Log.d(TAG, "Performed swipe $direction")
+        DebugLog.add(TAG, "Performed swipe $direction.")
     }
     
     private fun getCurrentElementsJson(): String {

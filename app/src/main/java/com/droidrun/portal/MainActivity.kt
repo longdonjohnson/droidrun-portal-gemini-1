@@ -27,7 +27,7 @@ class MainActivity : AppCompatActivity() {
     
     private lateinit var statusText: TextView
     private lateinit var responseText: TextView
-    private lateinit var toggleOverlay: SwitchMaterial
+    // private lateinit var toggleOverlay: SwitchMaterial // Removed
     private lateinit var fetchButton: MaterialButton
     private lateinit var retriggerButton: MaterialButton
     private lateinit var offsetSlider: SeekBar
@@ -42,7 +42,8 @@ class MainActivity : AppCompatActivity() {
     
     // Flag to prevent infinite update loops
     private var isProgrammaticUpdate = false
-    
+    private var isOverlayActuallyVisibleState: Boolean = true // Added
+
     // Properties for 5-tap gesture
     private var tapCount = 0
     private var lastTapTime: Long = 0
@@ -86,10 +87,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 
                 // Handle overlay toggle status
-                if (intent.hasExtra("overlay_status")) {
-                    val overlayVisible = intent.getBooleanExtra("overlay_status", true)
-                    toggleOverlay.isChecked = overlayVisible
-                }
+                // if (intent.hasExtra("overlay_status")) { // Commented out/Removed
+                //     val overlayVisible = intent.getBooleanExtra("overlay_status", true)
+                //     // toggleOverlay.isChecked = overlayVisible // toggleOverlay is removed
+                // }
                 
                 // Handle position offset response
                 if (intent.hasExtra("current_offset")) {
@@ -110,7 +111,7 @@ class MainActivity : AppCompatActivity() {
         responseText = findViewById(R.id.response_text)
         fetchButton = findViewById(R.id.fetch_button)
         retriggerButton = findViewById(R.id.retrigger_button)
-        toggleOverlay = findViewById(R.id.toggle_overlay)
+        // toggleOverlay = findViewById(R.id.toggle_overlay) // Removed
         offsetSlider = findViewById(R.id.offset_slider)
         offsetInput = findViewById(R.id.offset_input)
         offsetInputLayout = findViewById(R.id.offset_input_layout)
@@ -137,10 +138,10 @@ class MainActivity : AppCompatActivity() {
             retriggerElements()
         }
         
-        toggleOverlay.setOnCheckedChangeListener { _, isChecked ->
-            toggleOverlayVisibility(isChecked)
-        }
-        
+        // toggleOverlay.setOnCheckedChangeListener { _, isChecked -> // Removed
+        //     toggleOverlayVisibility(isChecked)
+        // }
+
         launchVoiceCommandButton.setOnClickListener {
             val intent = Intent(this, VoiceCommandActivity::class.java)
             startActivity(intent)
@@ -351,6 +352,7 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun toggleOverlayVisibility(visible: Boolean) {
+        isOverlayActuallyVisibleState = visible // Added
         try {
             val intent = Intent(DroidrunPortalService.ACTION_TOGGLE_OVERLAY).apply {
                 putExtra(DroidrunPortalService.EXTRA_OVERLAY_VISIBLE, visible)
@@ -434,7 +436,7 @@ class MainActivity : AppCompatActivity() {
 
     // Helper methods for DebugMenuFragment
     fun isOverlayCurrentlyVisible(): Boolean {
-        return toggleOverlay.isChecked // 'toggleOverlay' is the SwitchMaterial in MainActivity
+        return isOverlayActuallyVisibleState
     }
 
     fun getCurrentOffset(): Int {
@@ -443,11 +445,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun toggleOverlayVisibilityExternally(show: Boolean) {
-        // This method allows the fragment to change the overlay state
-        // which will also update MainActivity's own 'toggleOverlay' switch
-        if (toggleOverlay.isChecked != show) {
-            toggleOverlay.isChecked = show
-            // The existing listener on toggleOverlay will call toggleOverlayVisibility(show)
-        }
+        // Call the original method that handles the broadcast to the service
+        toggleOverlayVisibility(show)
     }
 } 

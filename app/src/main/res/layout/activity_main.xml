@@ -274,24 +274,6 @@
                             app:cornerRadius="12dp"
                             app:elevation="4dp" />
 
-                        <com.google.android.material.card.MaterialCardView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            app:cardCornerRadius="12dp"
-                            app:cardElevation="0dp"
-                            app:cardBackgroundColor="#2A332F"
-                            android:layout_marginBottom="16dp">
-                            
-                            <com.google.android.material.switchmaterial.SwitchMaterial
-                                android:id="@+id/toggle_overlay"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="Show Element Rectangles"
-                                android:textSize="16sp"
-                                android:textColor="@color/droidrun_text_secondary"
-                                android:checked="true"
-                                android:padding="16dp" />
-                        </com.google.android.material.card.MaterialCardView>
                     </LinearLayout>
 
                     <TextView

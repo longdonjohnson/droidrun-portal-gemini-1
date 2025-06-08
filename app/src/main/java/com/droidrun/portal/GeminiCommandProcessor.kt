@@ -1,6 +1,7 @@
 package com.droidrun.portal
 
 import android.content.Context
+import com.droidrun.portal.DebugLog // Added
 import android.util.Log
 import kotlinx.coroutines.*
 import org.json.JSONArray
@@ -28,9 +29,11 @@ class GeminiCommandProcessor(private val context: Context) {
     )
     
     fun processCommand(command: String, currentElements: String, callback: CommandCallback) {
+        DebugLog.add(TAG, "Processing NL command: '$command'")
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val prompt = buildPrompt(command, currentElements)
+                DebugLog.add(TAG, "Gemini prompt: $prompt")
                 val response = callGeminiAPI(prompt)
                 val actions = parseResponse(response)
                 
@@ -39,6 +42,7 @@ class GeminiCommandProcessor(private val context: Context) {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing command", e)
+                DebugLog.add(TAG, "Error processing command: ${e.message}")
                 withContext(Dispatchers.Main) {
                     callback.onError(e.message ?: "Unknown error")
                 }
@@ -98,8 +102,11 @@ Respond only with the JSON array, no other text.
             
             val responseCode = connection.responseCode
             if (responseCode == HttpURLConnection.HTTP_OK) {
-                connection.inputStream.bufferedReader().use { it.readText() }
+                val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
+                DebugLog.add(TAG, "Gemini raw response: $responseBody")
+                responseBody // Return the stored responseBody
             } else {
+                DebugLog.add(TAG, "Gemini API call failed with code: $responseCode, error: ${connection.errorStream?.bufferedReader()?.use { it.readText() }}")
                 throw Exception("API call failed with code: $responseCode")
             }
         }
@@ -112,11 +119,13 @@ Respond only with the JSON array, no other text.
             val content = candidates.getJSONObject(0).getJSONObject("content")
             val parts = content.getJSONArray("parts")
             val text = parts.getJSONObject(0).getString("text")
+            DebugLog.add(TAG, "Gemini response content text: $text")
             
             // Extract JSON array from the text
             val jsonStart = text.indexOf('[')
             val jsonEnd = text.lastIndexOf(']') + 1
             val jsonText = text.substring(jsonStart, jsonEnd)
+            DebugLog.add(TAG, "Extracted JSON text for parsing: $jsonText")
             
             val actionsArray = JSONArray(jsonText)
             val actions = mutableListOf<UIAction>()
@@ -133,10 +142,11 @@ Respond only with the JSON array, no other text.
                 )
                 actions.add(action)
             }
-            
+            DebugLog.add(TAG, "Parsed UIAction list: ${actions.joinToString()}")
             return actions
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing response", e)
+            DebugLog.add(TAG, "Error parsing Gemini response: ${e.message}")
             return emptyList()
         }
     }
