@@ -21,45 +21,38 @@ import com.google.android.material.textfield.TextInputLayout
 import android.provider.Settings
 import android.widget.ImageView
 import android.view.View
-import com.droidrun.portal.DebugMenuFragment
 
 class MainActivity : AppCompatActivity() {
     
     private lateinit var statusText: TextView
     private lateinit var responseText: TextView
-    // private lateinit var toggleOverlay: SwitchMaterial // Removed
+    private lateinit var toggleOverlay: SwitchMaterial
     private lateinit var fetchButton: MaterialButton
     private lateinit var retriggerButton: MaterialButton
     private lateinit var offsetSlider: SeekBar
     private lateinit var offsetInput: TextInputEditText
     private lateinit var offsetInputLayout: TextInputLayout
-    private lateinit var launchVoiceCommandButton: MaterialButton
     private lateinit var accessibilityIndicator: View
     private lateinit var accessibilityStatusText: TextView
     private lateinit var accessibilityStatusContainer: View
     private lateinit var accessibilityStatusCard: com.google.android.material.card.MaterialCardView
-    private lateinit var headerCard: com.google.android.material.card.MaterialCardView
     
     // Flag to prevent infinite update loops
     private var isProgrammaticUpdate = false
-    private var isOverlayActuallyVisibleState: Boolean = true // Added
-
-    // Properties for 5-tap gesture
-    private var tapCount = 0
-    private var lastTapTime: Long = 0
-    private val TAP_TIMEOUT = 500L // 500 milliseconds
-    private val REQUIRED_TAPS = 5
 
     // Constants for the position offset slider
     companion object {
-        private const val DEFAULT_OFFSET = -128
-        private const val MIN_OFFSET = -256
-        private const val MAX_OFFSET = 256
-        private const val SLIDER_RANGE = MAX_OFFSET - MIN_OFFSET
+        private const val DEFAULT_OFFSET = -128 // Keep for now if other logic depends on it
+        private const val MIN_OFFSET = -256   // Keep for now
+        private const val MAX_OFFSET = 256     // Keep for now
+        private const val SLIDER_RANGE = MAX_OFFSET - MIN_OFFSET // Keep for now
+        internal const val PREFS_NAME = "DroidRunPrefs" // Added for floating button
+        internal const val KEY_FLOATING_BUTTON_VISIBLE = "floating_button_visible" // Added
         
         // Intent action for updating overlay offset
         const val ACTION_UPDATE_OVERLAY_OFFSET = "com.droidrun.portal.UPDATE_OVERLAY_OFFSET"
         const val EXTRA_OVERLAY_OFFSET = "overlay_offset"
+        // Note: DroidrunPortalService.ACTION_TOGGLE_FLOATING_VOICE_BUTTON is defined in the service
     }
     
     // Broadcast receiver to get element data response
@@ -87,10 +80,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 
                 // Handle overlay toggle status
-                // if (intent.hasExtra("overlay_status")) { // Commented out/Removed
-                //     val overlayVisible = intent.getBooleanExtra("overlay_status", true)
-                //     // toggleOverlay.isChecked = overlayVisible // toggleOverlay is removed
-                // }
+                if (intent.hasExtra("overlay_status")) {
+                    val overlayVisible = intent.getBooleanExtra("overlay_status", true)
+                    toggleOverlay.isChecked = overlayVisible
+                }
                 
                 // Handle position offset response
                 if (intent.hasExtra("current_offset")) {
@@ -111,7 +104,7 @@ class MainActivity : AppCompatActivity() {
         responseText = findViewById(R.id.response_text)
         fetchButton = findViewById(R.id.fetch_button)
         retriggerButton = findViewById(R.id.retrigger_button)
-        // toggleOverlay = findViewById(R.id.toggle_overlay) // Removed
+        toggleOverlay = findViewById(R.id.toggle_overlay)
         offsetSlider = findViewById(R.id.offset_slider)
         offsetInput = findViewById(R.id.offset_input)
         offsetInputLayout = findViewById(R.id.offset_input_layout)
@@ -119,8 +112,6 @@ class MainActivity : AppCompatActivity() {
         accessibilityStatusText = findViewById(R.id.accessibility_status_text)
         accessibilityStatusContainer = findViewById(R.id.accessibility_status_container)
         accessibilityStatusCard = findViewById(R.id.accessibility_status_card)
-        launchVoiceCommandButton = findViewById(R.id.launch_voice_command_button)
-        headerCard = findViewById(R.id.header_card)
         
         // Configure the offset slider and input
         setupOffsetSlider()
@@ -138,13 +129,8 @@ class MainActivity : AppCompatActivity() {
             retriggerElements()
         }
         
-        // toggleOverlay.setOnCheckedChangeListener { _, isChecked -> // Removed
-        //     toggleOverlayVisibility(isChecked)
-        // }
-
-        launchVoiceCommandButton.setOnClickListener {
-            val intent = Intent(this, VoiceCommandActivity::class.java)
-            startActivity(intent)
+        toggleOverlay.setOnCheckedChangeListener { _, isChecked ->
+            toggleOverlayVisibility(isChecked)
         }
 
         // Setup accessibility status container
@@ -155,22 +141,26 @@ class MainActivity : AppCompatActivity() {
         // Check initial accessibility status
         updateAccessibilityStatusIndicator()
 
-        headerCard.setOnClickListener {
-            val currentTime = System.currentTimeMillis()
-            if (currentTime - lastTapTime < TAP_TIMEOUT) {
-                tapCount++
-            } else {
-                tapCount = 1 // Reset if timeout or first tap
-            }
-            lastTapTime = currentTime
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val shouldShowButtonInitially = prefs.getBoolean(KEY_FLOATING_BUTTON_VISIBLE, false) // Default to false
+        // Log.d("DROIDRUN_MAIN", "Initial floating button state from prefs: $shouldShowButtonInitially. Sending broadcast.") // DebugLog not added yet
+        // Send an initial broadcast to sync service state, especially if service restarted
+        val intent = Intent(DroidrunPortalService.ACTION_TOGGLE_FLOATING_VOICE_BUTTON)
+        intent.setPackage(packageName)
+        intent.putExtra("show_button", shouldShowButtonInitially)
+        sendBroadcast(intent)
+    }
 
-            if (tapCount == REQUIRED_TAPS) {
-                tapCount = 0 // Reset after triggering
-                val debugMenu = DebugMenuFragment.newInstance(this)
-                debugMenu.show(supportFragmentManager, DebugMenuFragment.TAG)
-                Log.d("DROIDRUN_MAIN", "Debug menu gesture detected and fragment shown.")
-            }
-        }
+    fun setFloatingVoiceButtonVisibility(show: Boolean) {
+        // Log.d("DROIDRUN_MAIN", "Setting floating button visibility to $show in MainActivity.") // DebugLog not added yet
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(KEY_FLOATING_BUTTON_VISIBLE, show).apply()
+
+        val intent = Intent(DroidrunPortalService.ACTION_TOGGLE_FLOATING_VOICE_BUTTON)
+        intent.setPackage(packageName) // Target the broadcast to own app's service
+        intent.putExtra("show_button", show)
+        sendBroadcast(intent)
+        // Log.d("DROIDRUN_MAIN", "Floating button visibility set to $show and broadcasted.") // DebugLog not added yet
     }
     
     override fun onResume() {
@@ -352,7 +342,6 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun toggleOverlayVisibility(visible: Boolean) {
-        isOverlayActuallyVisibleState = visible // Added
         try {
             val intent = Intent(DroidrunPortalService.ACTION_TOGGLE_OVERLAY).apply {
                 putExtra(DroidrunPortalService.EXTRA_OVERLAY_VISIBLE, visible)
@@ -432,20 +421,5 @@ class MainActivity : AppCompatActivity() {
                 Toast.LENGTH_SHORT
             ).show()
         }
-    }
-
-    // Helper methods for DebugMenuFragment
-    fun isOverlayCurrentlyVisible(): Boolean {
-        return isOverlayActuallyVisibleState
-    }
-
-    fun getCurrentOffset(): Int {
-        // Assuming offsetInput (TextInputEditText) holds the current authoritative value
-        return offsetInput.text.toString().toIntOrNull() ?: DEFAULT_OFFSET
-    }
-
-    fun toggleOverlayVisibilityExternally(show: Boolean) {
-        // Call the original method that handles the broadcast to the service
-        toggleOverlayVisibility(show)
     }
 } 
