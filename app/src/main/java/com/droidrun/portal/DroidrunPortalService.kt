@@ -318,6 +318,9 @@ class DroidrunPortalService : AccessibilityService() {
         executeAction(actionToExecute) // This is synchronous
 
         // After action, re-evaluate by asking Gemini for next steps with new context
+        // This delay is crucial to allow the UI to settle after an action, especially for apps
+        // that have loading times or animations. Increased from 1000ms to 2000ms
+        // to give more time for slower apps or network operations to complete.
         mainHandler.postDelayed({
             if (isProcessingMultiStep) {
                 DebugLog.add(TAG, "Post-action delay complete for '$currentOriginalCommand'. Requesting next step from Gemini (CONTINUATION_VALIDATE).")
@@ -336,7 +339,7 @@ class DroidrunPortalService : AccessibilityService() {
             } else {
                  DebugLog.add(TAG, "Post-action delay: No longer processing multi-step for '$currentOriginalCommand'. Not continuing.")
             }
-        }, 1000) // UI settle delay
+        }, 2000) // UI settle delay - Increased to 2 seconds
     }
     
     private fun processVoiceCommand(command: String) {
@@ -394,18 +397,57 @@ class DroidrunPortalService : AccessibilityService() {
     }
     
     private fun performScroll(direction: String) {
-        val actionCode = when (direction.lowercase()) {
+        val scrollableNode = findFirstScrollableNode(rootInActiveWindow)
+        if (scrollableNode == null) {
+            DebugLog.add(TAG, "No scrollable node found to perform scroll $direction.")
+            // Attempt to scroll on root if no specific scrollable node is found
+            val rootActionCode = when (direction.lowercase()) {
+                "up" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+                "down" -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+                "left" -> AccessibilityNodeInfo.ACTION_SCROLL_LEFT
+                "right" -> AccessibilityNodeInfo.ACTION_SCROLL_RIGHT
+                else -> { DebugLog.add(TAG, "Unknown scroll direction for root: $direction"); return }
+            }
+            if (rootInActiveWindow?.getActionList()?.contains(AccessibilityNodeInfo.AccessibilityAction(rootActionCode, null)) == true) {
+                rootInActiveWindow?.performAction(rootActionCode)
+                DebugLog.add(TAG, "Performed scroll $direction on root window.")
+            } else {
+                DebugLog.add(TAG, "Scroll $direction not supported by root window or root is null.")
+            }
+            return
+        }
+
+        val actionCode: Int? = when (direction.lowercase()) {
             "up" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
             "down" -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
-            "left" -> { DebugLog.add(TAG, "Horizontal scroll (left) requested, defaulting to SCROLL_BACKWARD (up)."); AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD }
-            "right" -> { DebugLog.add(TAG, "Horizontal scroll (right) requested, defaulting to SCROLL_FORWARD (down)."); AccessibilityNodeInfo.ACTION_SCROLL_FORWARD }
-            else -> { DebugLog.add(TAG, "Unknown scroll direction: $direction"); return }
+            "left" -> AccessibilityNodeInfo.ACTION_SCROLL_LEFT
+            "right" -> AccessibilityNodeInfo.ACTION_SCROLL_RIGHT
+            else -> {
+                DebugLog.add(TAG, "Unknown scroll direction: $direction")
+                null
+            }
         }
-        val scrollableNode = findFirstScrollableNode(rootInActiveWindow)
-        if (scrollableNode != null) {
-            scrollableNode.performAction(actionCode); DebugLog.add(TAG, "Performed scroll $direction on specific node.")
-        } else {
-            rootInActiveWindow?.performAction(actionCode); DebugLog.add(TAG, "Performed scroll $direction on root window.")
+
+        if (actionCode != null) {
+            // Check if the node supports the specific scroll action
+            val supportedActions = scrollableNode.actionList
+            val desiredAction = AccessibilityNodeInfo.AccessibilityAction(actionCode, null)
+
+            if (supportedActions.contains(desiredAction)) {
+                scrollableNode.performAction(actionCode)
+                DebugLog.add(TAG, "Performed scroll $direction on specific node.")
+            } else {
+                // Fallback for horizontal scroll if specific action not available, e.g. could try swipe
+                // For now, just log if the specific horizontal action isn't available
+                if (direction.lowercase() == "left" || direction.lowercase() == "right") {
+                    DebugLog.add(TAG, "Scroll $direction (action $actionCode) not directly supported by the node. Consider swipe as fallback.")
+                    // Optionally, could attempt swipe here: performSwipe(direction)
+                } else {
+                    // For vertical scrolls, if specific up/down not found, it's unusual.
+                    // The old code would have tried on root, which is now handled if scrollableNode is null initially.
+                    DebugLog.add(TAG, "Scroll $direction (action $actionCode) not supported by the identified scrollable node.")
+                }
+            }
         }
     }
 
