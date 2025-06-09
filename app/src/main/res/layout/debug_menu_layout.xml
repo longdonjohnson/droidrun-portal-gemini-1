@@ -63,6 +63,79 @@
                     android:text="-128" />
             </LinearLayout>
 
+            <!-- Placeholder for offset controls that will be added in this subtask -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Overlay Position Offset"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:layout_marginTop="16dp"/>
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/debug_menu_offset_input_layout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense"
+                android:layout_marginTop="8dp"
+                app:hintTextColor="?attr/colorPrimary"
+                android:hint="Offset value (-256 to 256)">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/debug_menu_offset_input"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberSigned"
+                    android:textSize="16sp"/>
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <SeekBar
+                android:id="@+id/debug_menu_offset_slider"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:max="512" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Overlay Position X-Offset"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:layout_marginTop="16dp"/>
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/debug_menu_offset_x_input_layout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense"
+                android:layout_marginTop="8dp"
+                app:hintTextColor="?attr/colorPrimary"
+                android:hint="X-Offset value (-256 to 256)">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/debug_menu_offset_x_input"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberSigned"
+                    android:textSize="16sp"/>
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <SeekBar
+                android:id="@+id/debug_menu_offset_x_slider"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:max="512" />
+
+            <!-- Floating Button Toggle Switch to be added here -->
+            <com.google.android.material.switchmaterial.SwitchMaterial
+                android:id="@+id/debug_menu_floating_button_toggle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Show Floating Voice Button"
+                android:layout_marginTop="16dp" />
+
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -74,18 +147,28 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Refresh Logs"
+                    android:text="Refresh"
                     style="?android:attr/buttonBarButtonStyle"
-                    android:layout_marginEnd="4dp"/>
+                    android:layout_marginEnd="2dp"/>
 
                 <Button
                     android:id="@+id/debug_menu_clear_logs_button"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Clear Logs"
+                    android:text="Clear"
                     style="?android:attr/buttonBarButtonStyle"
-                    android:layout_marginStart="4dp"/>
+                    android:layout_marginStart="2dp"
+                    android:layout_marginEnd="2dp"/>
+
+                <Button
+                    android:id="@+id/debug_menu_copy_logs_button"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Copy"
+                    style="?android:attr/buttonBarButtonStyle"
+                    android:layout_marginStart="2dp"/>
             </LinearLayout>
 
             <TextView
