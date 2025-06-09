@@ -88,7 +88,8 @@ class VoiceCommandActivity : Activity() {
         }
         
         // Send command to the accessibility service
-        val intent = Intent("com.droidrun.portal.NATURAL_LANGUAGE_COMMAND").apply {
+        // Ensure this action matches one listened to by DroidrunPortalService
+        val intent = Intent("com.droidrun.portal.PROCESS_VOICE_COMMAND").apply {
             putExtra("command", command)
             setPackage(packageName)
         }
