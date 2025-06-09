@@ -401,17 +401,31 @@ class DroidrunPortalService : AccessibilityService() {
         if (scrollableNode == null) {
             DebugLog.add(TAG, "No scrollable node found to perform scroll $direction.")
             // Attempt to scroll on root if no specific scrollable node is found
-            val rootActionCode = when (direction.lowercase()) {
-                "up" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
-                "down" -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
-                "left" -> AccessibilityNodeInfo.ACTION_SCROLL_LEFT
-                "right" -> AccessibilityNodeInfo.ACTION_SCROLL_RIGHT
-                else -> { DebugLog.add(TAG, "Unknown scroll direction for root: $direction"); return }
+            var rootActionCode: Int? = null
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                rootActionCode = when (direction.lowercase()) {
+                    "up" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+                    "down" -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+                    "left" -> AccessibilityNodeInfo.ACTION_SCROLL_LEFT // Safe within API check
+                    "right" -> AccessibilityNodeInfo.ACTION_SCROLL_RIGHT // Safe within API check
+                    else -> { DebugLog.add(TAG, "Unknown scroll direction for root: $direction"); null }
+                }
+            } else { // Fallback for API < 30 for root scroll
+                rootActionCode = when (direction.lowercase()) {
+                    "up" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+                    "down" -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+                    "left", "right" -> { // Horizontal scroll not directly supported on root via these constants pre-API 30
+                        DebugLog.add(TAG, "Horizontal scroll $direction on root not available pre-API 30 via simple constants.")
+                        null
+                    }
+                    else -> { DebugLog.add(TAG, "Unknown scroll direction for root: $direction"); null }
+                }
             }
-            if (rootInActiveWindow?.getActionList()?.contains(AccessibilityNodeInfo.AccessibilityAction(rootActionCode, null)) == true) {
+
+            if (rootActionCode != null && rootInActiveWindow?.getActionList()?.contains(AccessibilityNodeInfo.AccessibilityAction(rootActionCode, null)) == true) {
                 rootInActiveWindow?.performAction(rootActionCode)
                 DebugLog.add(TAG, "Performed scroll $direction on root window.")
-            } else {
+            } else if (rootActionCode != null) { // Only log if an action was determined but not supported or root is null
                 DebugLog.add(TAG, "Scroll $direction not supported by root window or root is null.")
             }
             return
@@ -420,8 +434,8 @@ class DroidrunPortalService : AccessibilityService() {
         val actionCode: Int? = when (direction.lowercase()) {
             "up" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
             "down" -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
-            "left" -> AccessibilityNodeInfo.ACTION_SCROLL_LEFT
-            "right" -> AccessibilityNodeInfo.ACTION_SCROLL_RIGHT
+            "left" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) AccessibilityNodeInfo.ACTION_SCROLL_LEFT else null
+            "right" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) AccessibilityNodeInfo.ACTION_SCROLL_RIGHT else null
             else -> {
                 DebugLog.add(TAG, "Unknown scroll direction: $direction")
                 null
@@ -437,17 +451,18 @@ class DroidrunPortalService : AccessibilityService() {
                 scrollableNode.performAction(actionCode)
                 DebugLog.add(TAG, "Performed scroll $direction on specific node.")
             } else {
-                // Fallback for horizontal scroll if specific action not available, e.g. could try swipe
-                // For now, just log if the specific horizontal action isn't available
+                // Fallback for horizontal scroll if specific action not available
                 if (direction.lowercase() == "left" || direction.lowercase() == "right") {
-                    DebugLog.add(TAG, "Scroll $direction (action $actionCode) not directly supported by the node. Consider swipe as fallback.")
+                    DebugLog.add(TAG, "Scroll $direction (action $actionCode) not directly supported by the node. API Level: ${Build.VERSION.SDK_INT}. Consider swipe as fallback.")
                     // Optionally, could attempt swipe here: performSwipe(direction)
                 } else {
-                    // For vertical scrolls, if specific up/down not found, it's unusual.
-                    // The old code would have tried on root, which is now handled if scrollableNode is null initially.
                     DebugLog.add(TAG, "Scroll $direction (action $actionCode) not supported by the identified scrollable node.")
                 }
             }
+        } else if (direction.lowercase() == "left" || direction.lowercase() == "right") {
+            // This case specifically handles when actionCode is null because API level was too low for ACTION_SCROLL_LEFT/RIGHT constants
+            DebugLog.add(TAG, "Horizontal scroll $direction not available on this API level (${Build.VERSION.SDK_INT}). Consider swipe.")
+            // Optionally, could attempt swipe here: performSwipe(direction)
         }
     }
 
