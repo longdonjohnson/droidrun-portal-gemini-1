@@ -163,7 +163,6 @@ class GeminiCommandProcessor(private val context: Context) {
         DebugLog.add(TAG, "Attempting to parse response (first 200 chars): ${jsonTextToParse.take(200)}")
 
         try {
-            // Check if the response is the verbose format with "candidates"
             if (jsonTextToParse.startsWith("{") && jsonTextToParse.contains("candidates")) {
                 val jsonResponse = JSONObject(jsonTextToParse)
                 val candidates = jsonResponse.optJSONArray("candidates")
@@ -175,7 +174,7 @@ class GeminiCommandProcessor(private val context: Context) {
                         DebugLog.add(TAG, "Gemini response indicates an error: $errorMessage")
                         throw Exception("Gemini API error: $errorMessage")
                     }
-                    return emptyList() // No candidates, no error, return empty
+                    return emptyList()
                 }
                 val content = candidates.getJSONObject(0).optJSONObject("content")
                 if (content == null) {
@@ -196,14 +195,13 @@ class GeminiCommandProcessor(private val context: Context) {
             }
 
             val actions = mutableListOf<UIAction>()
-            // Now, jsonTextToParse should be the direct JSON (array or single object)
             if (jsonTextToParse.startsWith("[")) {
                 val actionsArray = JSONArray(jsonTextToParse)
                 for (i in 0 until actionsArray.length()) {
                     val actionObj = actionsArray.getJSONObject(i)
                     actions.add(parseActionObject(actionObj))
                 }
-            } else if (jsonTextToParse.startsWith("{")) { // Single action (e.g. "finish")
+            } else if (jsonTextToParse.startsWith("{")) {
                 val actionObj = JSONObject(jsonTextToParse)
                 actions.add(parseActionObject(actionObj))
             } else {
@@ -215,14 +213,14 @@ class GeminiCommandProcessor(private val context: Context) {
             return actions
         } catch (e: Exception) {
             DebugLog.add(TAG, "Error parsing Gemini response JSON: ${e.message}. Response was (first 200 chars): ${response.take(200)}")
-            Log.e(TAG, "Error parsing full response JSON", e) // Log full exception for detailed debugging
-            throw e // Re-throw to be caught by makeGeminiRequest's try-catch
+            Log.e(TAG, "Error parsing full response JSON", e)
+            throw e
         }
     }
 
     private fun parseActionObject(actionObj: JSONObject): UIAction {
         val type = actionObj.getString("type")
-        if (type.isBlank()) { // It's critical that 'type' exists and is not blank.
+        if (type.isBlank()) {
             throw Exception("Action type is blank in JSON object: $actionObj")
         }
         return UIAction(

@@ -1,24 +1,24 @@
 package com.droidrun.portal
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
+import android.text.method.ScrollingMovementMethod
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
 import android.widget.Button
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.fragment.app.DialogFragment
 import com.google.android.material.switchmaterial.SwitchMaterial
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
-import android.widget.SeekBar
-import android.text.TextWatcher
-import android.text.Editable
-import android.text.method.ScrollingMovementMethod
-import android.content.Context
-import android.content.ClipboardManager
-import android.content.ClipData
-import android.view.inputmethod.EditorInfo
 
 class DebugMenuFragment : DialogFragment() {
 
@@ -32,7 +32,7 @@ class DebugMenuFragment : DialogFragment() {
     private lateinit var debugOffsetInputLayout: TextInputLayout
     private lateinit var debugOffsetInput: TextInputEditText
     private lateinit var debugOffsetSlider: SeekBar
-    private lateinit var floatingButtonToggle: SwitchMaterial // New
+    private lateinit var floatingButtonToggle: SwitchMaterial
 
     private var isProgrammaticOffsetUpdate = false
 
@@ -49,9 +49,8 @@ class DebugMenuFragment : DialogFragment() {
         val closeButton: Button = view.findViewById(R.id.debug_menu_close_button)
         closeButton.setOnClickListener { dismiss() }
 
-        // Initialize existing views
         overlayToggle = view.findViewById(R.id.debug_menu_overlay_toggle)
-        offsetValueText = view.findViewById(R.id.debug_menu_offset_value) // TextView for current offset
+        offsetValueText = view.findViewById(R.id.debug_menu_offset_value)
         logTextView = view.findViewById(R.id.debug_menu_log_textview)
         refreshLogsButton = view.findViewById(R.id.debug_menu_refresh_logs_button)
         clearLogsButton = view.findViewById(R.id.debug_menu_clear_logs_button)
@@ -59,18 +58,16 @@ class DebugMenuFragment : DialogFragment() {
         debugOffsetInputLayout = view.findViewById(R.id.debug_menu_offset_input_layout)
         debugOffsetInput = view.findViewById(R.id.debug_menu_offset_input)
         debugOffsetSlider = view.findViewById(R.id.debug_menu_offset_slider)
-        floatingButtonToggle = view.findViewById(R.id.debug_menu_floating_button_toggle) // New
+        floatingButtonToggle = view.findViewById(R.id.debug_menu_floating_button_toggle)
 
         logTextView.movementMethod = ScrollingMovementMethod()
 
         mainActivityInstance?.let { activity ->
-            // Overlay toggle
             overlayToggle.isChecked = activity.isOverlayCurrentlyVisible()
             overlayToggle.setOnCheckedChangeListener { _, isChecked ->
                 activity.toggleOverlayVisibilityExternally(isChecked)
             }
 
-            // Offset controls
             val currentOffset = activity.getCurrentOffset()
             isProgrammaticOffsetUpdate = true
             offsetValueText.text = currentOffset.toString()
@@ -120,12 +117,14 @@ class DebugMenuFragment : DialogFragment() {
                 }
             })
             debugOffsetInput.setOnEditorActionListener { _, actionId, _ ->
-                if (actionId == EditorInfo.IME_ACTION_DONE) { true } else { false }
+                if (actionId == EditorInfo.IME_ACTION_DONE) {
+                    // Hide keyboard or clear focus if needed
+                    true
+                } else { false }
             }
 
-            // Floating button toggle
             val prefs = activity.getSharedPreferences(MainActivity.PREFS_NAME, Context.MODE_PRIVATE)
-            floatingButtonToggle.isChecked = prefs?.getBoolean(MainActivity.KEY_FLOATING_BUTTON_VISIBLE, false) ?: false
+            floatingButtonToggle.isChecked = prefs.getBoolean(MainActivity.KEY_FLOATING_BUTTON_VISIBLE, false)
             floatingButtonToggle.setOnCheckedChangeListener { _, isChecked ->
                 activity.setFloatingVoiceButtonVisibility(isChecked)
             }
@@ -138,7 +137,7 @@ class DebugMenuFragment : DialogFragment() {
         }
         copyLogsButton.setOnClickListener { copyLogsToClipboard() }
 
-        refreshLogView() // Initial population
+        refreshLogView()
     }
 
     private fun copyLogsToClipboard() {
@@ -151,16 +150,11 @@ class DebugMenuFragment : DialogFragment() {
         val clip = ClipData.newPlainText("DroidRun Logs", logs)
         clipboard?.setPrimaryClip(clip)
         Toast.makeText(context, "Logs copied to clipboard!", Toast.LENGTH_SHORT).show()
-        // Assuming DebugLog is accessible here, if not, this line would need adjustment or removal.
-        // For now, I'll assume DebugLog.kt was also part of the reset and isn't available.
-        // DebugLog.add("DebugMenu", "Logs copied to clipboard.")
+        DebugLog.add(TAG, "Logs copied to clipboard.")
     }
 
     private fun refreshLogView() {
-        if (::logTextView.isInitialized) {
-            // Assuming DebugLog is accessible here.
-            // If DebugLog.kt was reset, this would fail.
-            // For now, I'll assume DebugLog.kt would be re-created or handled separately.
+        if (::logTextView.isInitialized) { // Check if logTextView has been initialized
             val logs = DebugLog.getLogs()
             logTextView.text = if (logs.isEmpty()) "No logs yet." else logs.joinToString("\n")
         }
