@@ -467,7 +467,9 @@ class DroidrunPortalService : AccessibilityService() {
             AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
                 if (isInitialized) {
                     mainHandler.removeCallbacks(processActiveWindowRunnable)
-                    mainHandler.postDelayed(processActiveWindowRunnable, 150)
+                    val delay = if (isProcessingMultiStep) 500L else 150L
+                    mainHandler.postDelayed(processActiveWindowRunnable, delay)
+                    DebugLog.add(TAG, "Scheduled processActiveWindow with delay: $delay ms (isProcessingMultiStep: $isProcessingMultiStep)")
                 }
             }
         }

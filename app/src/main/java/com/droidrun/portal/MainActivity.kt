@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.Uri // For Uri.parse
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -268,14 +269,48 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun setFloatingVoiceButtonVisibility(show: Boolean) {
-        DebugLog.add(TAG, "Setting floating button visibility to $show (from DebugMenu or self).")
+        DebugLog.add(TAG, "setFloatingVoiceButtonVisibility called with: $show")
+
+        if (show) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+                DebugLog.add(TAG, "SYSTEM_ALERT_WINDOW permission not granted. Requesting.")
+                Toast.makeText(this, "DroidRun Portal needs 'Draw over other apps' permission for the floating button. Please grant it.", Toast.LENGTH_LONG).show()
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName")
+                )
+                // We're not using startActivityForResult here as managing the result
+                // to automatically toggle the switch can be complex and might require onActivityResult handling.
+                // The user will grant permission and can then re-toggle the switch if needed,
+                // or the service will pick up the state on its next check/restart.
+                // For simplicity, we'll just save the desired state and send the broadcast.
+                // The service's showFloatingVoiceButton() also has a Settings.canDrawOverlays() check.
+                startActivity(intent)
+
+                // Even if permission is not granted yet, save the desired state.
+                // The service will only show the button if permission is active.
+                val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                prefs.edit().putBoolean(KEY_FLOATING_BUTTON_VISIBLE, true).apply() // Save desired 'true' state
+
+                // Send broadcast to service anyway. Service will do its own canDrawOverlays check.
+                val broadcastIntent = Intent(DroidrunPortalService.ACTION_TOGGLE_FLOATING_VOICE_BUTTON)
+                broadcastIntent.setPackage(packageName)
+                broadcastIntent.putExtra("show_button", true)
+                sendBroadcast(broadcastIntent)
+                DebugLog.add(TAG, "Saved FAB visible: true to Prefs and broadcasted. Permission activity launched.")
+                return // Return after launching settings
+            }
+            // If permission is already granted or not needed (older Android version)
+        }
+
+        // Proceed to save preference and send broadcast
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putBoolean(KEY_FLOATING_BUTTON_VISIBLE, show).apply()
 
-        val intent = Intent(DroidrunPortalService.ACTION_TOGGLE_FLOATING_VOICE_BUTTON)
-        intent.setPackage(packageName)
-        intent.putExtra("show_button", show)
-        sendBroadcast(intent)
-        DebugLog.add(TAG, "Floating button visibility set to $show and broadcasted to service.")
+        val broadcastIntent = Intent(DroidrunPortalService.ACTION_TOGGLE_FLOATING_VOICE_BUTTON)
+        broadcastIntent.setPackage(packageName)
+        broadcastIntent.putExtra("show_button", show)
+        sendBroadcast(broadcastIntent)
+        DebugLog.add(TAG, "Floating button visibility set to $show, saved to Prefs and broadcasted to service.")
     }
 }
