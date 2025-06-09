@@ -55,6 +55,11 @@ class MainActivity : AppCompatActivity() {
 
        const val ACTION_UPDATE_OVERLAY_OFFSET = "com.droidrun.portal.UPDATE_OVERLAY_OFFSET"
        const val EXTRA_OVERLAY_OFFSET = "overlay_offset"
+
+       internal const val KEY_OVERLAY_OFFSET_X = "overlay_offset_x"
+       internal const val DEFAULT_OFFSET_X = 0
+       const val ACTION_UPDATE_OVERLAY_OFFSET_X = "com.droidrun.portal.UPDATE_OVERLAY_OFFSET_X"
+       const val EXTRA_OVERLAY_OFFSET_X = "overlay_offset_x"
    }
     
     private val elementDataReceiver = object : BroadcastReceiver() {
@@ -138,6 +143,10 @@ class MainActivity : AppCompatActivity() {
         val initialOffset = prefs.getInt(KEY_OVERLAY_OFFSET, DEFAULT_OFFSET)
         DebugLog.add(TAG, "Initial offset from prefs: $initialOffset. Notifying service.")
         setNewOverlayOffset(initialOffset) // This saves to prefs (redundantly here) and broadcasts
+
+        val initialOffsetX = prefs.getInt(KEY_OVERLAY_OFFSET_X, DEFAULT_OFFSET_X)
+        DebugLog.add(TAG, "Initial X-offset from prefs: $initialOffsetX. Notifying service.")
+        setNewOverlayOffsetX(initialOffsetX)
 
         updateAccessibilityStatusIndicator()
     }
@@ -234,14 +243,21 @@ class MainActivity : AppCompatActivity() {
         return isOverlayActuallyVisibleState
     }
 
-    fun getCurrentOffset(): Int {
+    fun getCurrentOffset(): Int { // This is for Y-offset
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val offset = prefs.getInt(KEY_OVERLAY_OFFSET, DEFAULT_OFFSET)
-        DebugLog.add(TAG, "DebugMenuFragment queried getCurrentOffset from Prefs: $offset")
+        DebugLog.add(TAG, "DebugMenuFragment queried getCurrentOffset (Y) from Prefs: $offset")
         return offset
     }
 
-    fun setNewOverlayOffset(newOffset: Int) {
+    fun getCurrentOffsetX(): Int {
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val offsetX = prefs.getInt(KEY_OVERLAY_OFFSET_X, DEFAULT_OFFSET_X)
+        DebugLog.add(TAG, "getCurrentOffsetX returning from Prefs: $offsetX")
+        return offsetX
+    }
+
+    fun setNewOverlayOffset(newOffset: Int) { // This is for Y-offset
         val boundedOffset = newOffset.coerceIn(MIN_OFFSET, MAX_OFFSET)
         DebugLog.add(TAG, "setNewOverlayOffset (from DebugMenu) called with: $newOffset, bounded to: $boundedOffset")
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -251,7 +267,21 @@ class MainActivity : AppCompatActivity() {
         intent.setPackage(packageName)
         intent.putExtra(EXTRA_OVERLAY_OFFSET, boundedOffset)
         sendBroadcast(intent)
-        DebugLog.add(TAG, "Overlay offset updated to $boundedOffset by DebugMenu and broadcasted to service.")
+        DebugLog.add(TAG, "Overlay Y-offset updated to $boundedOffset by DebugMenu and broadcasted to service.")
+    }
+
+    fun setNewOverlayOffsetX(newOffsetX: Int) {
+        // Assuming MIN_OFFSET and MAX_OFFSET can apply to X offset too, or define new X-specific min/max
+        val boundedOffsetX = newOffsetX.coerceIn(MIN_OFFSET, MAX_OFFSET) // Using existing MIN/MAX for now
+        DebugLog.add(TAG, "setNewOverlayOffsetX (from DebugMenu) called with: $newOffsetX, bounded to: $boundedOffsetX")
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putInt(KEY_OVERLAY_OFFSET_X, boundedOffsetX).apply()
+
+        val intent = Intent(ACTION_UPDATE_OVERLAY_OFFSET_X)
+        intent.setPackage(packageName)
+        intent.putExtra(EXTRA_OVERLAY_OFFSET_X, boundedOffsetX)
+        sendBroadcast(intent)
+        DebugLog.add(TAG, "Overlay X-offset updated to $boundedOffsetX by DebugMenu and broadcasted to service.")
     }
 
     fun toggleOverlayVisibilityExternally(show: Boolean) {

@@ -34,6 +34,11 @@ class DebugMenuFragment : DialogFragment() {
     private lateinit var debugOffsetSlider: SeekBar
     private lateinit var floatingButtonToggle: SwitchMaterial
 
+    // X-Offset Controls
+    private lateinit var debugOffsetXInputLayout: TextInputLayout
+    private lateinit var debugOffsetXInput: TextInputEditText
+    private lateinit var debugOffsetXSlider: SeekBar
+
     private var isProgrammaticOffsetUpdate = false
 
     override fun onCreateView(
@@ -60,6 +65,11 @@ class DebugMenuFragment : DialogFragment() {
         debugOffsetSlider = view.findViewById(R.id.debug_menu_offset_slider)
         floatingButtonToggle = view.findViewById(R.id.debug_menu_floating_button_toggle)
 
+        // Initialize X-Offset views
+        debugOffsetXInputLayout = view.findViewById(R.id.debug_menu_offset_x_input_layout)
+        debugOffsetXInput = view.findViewById(R.id.debug_menu_offset_x_input)
+        debugOffsetXSlider = view.findViewById(R.id.debug_menu_offset_x_slider)
+
         logTextView.movementMethod = ScrollingMovementMethod()
 
         mainActivityInstance?.let { activity ->
@@ -75,8 +85,18 @@ class DebugMenuFragment : DialogFragment() {
             // Ensure MIN_OFFSET and MAX_OFFSET are accessible from MainActivity for slider setup
             debugOffsetSlider.max = MainActivity.MAX_OFFSET - MainActivity.MIN_OFFSET
             debugOffsetSlider.progress = currentOffset - MainActivity.MIN_OFFSET
+            // Y-Offset setup finished
+
+            // Load and set initial X-Offset value
+            val currentOffsetX = activity.getCurrentOffsetX() // New method in MainActivity
+            isProgrammaticOffsetUpdate = true // Use same flag to prevent listener loops
+            debugOffsetXInput.setText(currentOffsetX.toString())
+            // Assuming MIN_OFFSET and MAX_OFFSET from MainActivity apply to X too
+            debugOffsetXSlider.max = MainActivity.MAX_OFFSET - MainActivity.MIN_OFFSET
+            debugOffsetXSlider.progress = currentOffsetX - MainActivity.MIN_OFFSET
             isProgrammaticOffsetUpdate = false
 
+            // Listener for Y-Offset Slider
             debugOffsetSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                     if (fromUser) {
@@ -121,6 +141,55 @@ class DebugMenuFragment : DialogFragment() {
                     // Hide keyboard or clear focus if needed
                     true
                 } else { false }
+            }
+
+            // Listeners for X-Offset Controls
+            debugOffsetXSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    if (fromUser) {
+                        isProgrammaticOffsetUpdate = true
+                        val actualValue = progress + MainActivity.MIN_OFFSET
+                        debugOffsetXInput.setText(actualValue.toString())
+                        activity.setNewOverlayOffsetX(actualValue) // New method in MainActivity
+                        isProgrammaticOffsetUpdate = false
+                    }
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+
+            debugOffsetXInput.addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                override fun afterTextChanged(s: Editable?) {
+                    if (isProgrammaticOffsetUpdate) return
+                    val value = s.toString().toIntOrNull()
+                    if (value != null) {
+                        if (value >= MainActivity.MIN_OFFSET && value <= MainActivity.MAX_OFFSET) { // Using existing MIN/MAX
+                            debugOffsetXInputLayout.error = null
+                            isProgrammaticOffsetUpdate = true
+                            debugOffsetXSlider.progress = value - MainActivity.MIN_OFFSET
+                            activity.setNewOverlayOffsetX(value) // New method in MainActivity
+                            isProgrammaticOffsetUpdate = false
+                        } else {
+                            debugOffsetXInputLayout.error = "Min: ${MainActivity.MIN_OFFSET}, Max: ${MainActivity.MAX_OFFSET}"
+                        }
+                    } else if (s.toString().isNotEmpty() && s.toString() != "-") {
+                        debugOffsetXInputLayout.error = "Invalid number"
+                    } else {
+                        debugOffsetXInputLayout.error = null
+                    }
+                }
+            })
+            debugOffsetXInput.setOnEditorActionListener { v, actionId, event ->
+                if (actionId == EditorInfo.IME_ACTION_DONE) {
+                    v.clearFocus()
+                    val imm = context?.getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+                    imm?.hideSoftInputFromWindow(v.windowToken, 0)
+                    true
+                } else {
+                    false
+                }
             }
 
             val prefs = activity.getSharedPreferences(MainActivity.PREFS_NAME, Context.MODE_PRIVATE)

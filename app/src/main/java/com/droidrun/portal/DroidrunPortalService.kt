@@ -141,6 +141,15 @@ class DroidrunPortalService : AccessibilityService() {
                                 DebugLog.add(TAG, "OverlayManager not initialized, cannot set offset.")
                             }
                         }
+                        MainActivity.ACTION_UPDATE_OVERLAY_OFFSET_X -> {
+                            val offsetXValue = intent.getIntExtra(MainActivity.EXTRA_OVERLAY_OFFSET_X, MainActivity.DEFAULT_OFFSET_X)
+                            DebugLog.add(TAG, "Received ACTION_UPDATE_OVERLAY_OFFSET_X, new X-offset: $offsetXValue")
+                            if (::overlayManager.isInitialized) {
+                                overlayManager.setPositionOffsetX(offsetXValue)
+                            } else {
+                                DebugLog.add(TAG, "OverlayManager not initialized, cannot set X-offset for overlay.")
+                            }
+                        }
                         ACTION_TOGGLE_OVERLAY -> {
                             isOverlayVisuallyEnabledState = intent.getBooleanExtra(EXTRA_OVERLAY_VISIBLE, true)
                             DebugLog.add(TAG, "Overlay visibility toggled: $isOverlayVisuallyEnabledState. Applying.")
@@ -166,6 +175,7 @@ class DroidrunPortalService : AccessibilityService() {
                 addAction("com.droidrun.portal.PROCESS_VOICE_COMMAND")
                 addAction(ACTION_TOGGLE_FLOATING_VOICE_BUTTON)
                 addAction(MainActivity.ACTION_UPDATE_OVERLAY_OFFSET)
+                addAction(MainActivity.ACTION_UPDATE_OVERLAY_OFFSET_X) // Added X-offset action
                 addAction(ACTION_TOGGLE_OVERLAY)
                 addAction(ACTION_GET_ELEMENTS)
                 addAction(ACTION_GET_ALL_ELEMENTS)
@@ -186,8 +196,12 @@ class DroidrunPortalService : AccessibilityService() {
 
             val prefs = getSharedPreferences(MainActivity.PREFS_NAME, Context.MODE_PRIVATE)
             isOverlayVisuallyEnabledState = prefs.getBoolean(MainActivity.KEY_OVERLAY_VISIBLE, true) // Use MainActivity's key
-            val currentOffset = prefs.getInt(MainActivity.KEY_OVERLAY_OFFSET, MainActivity.DEFAULT_OFFSET)
-            overlayManager.setPositionOffsetY(currentOffset)
+            val currentYOffset = prefs.getInt(MainActivity.KEY_OVERLAY_OFFSET, MainActivity.DEFAULT_OFFSET)
+            overlayManager.setPositionOffsetY(currentYOffset)
+            val currentOffsetX = prefs.getInt(MainActivity.KEY_OVERLAY_OFFSET_X, MainActivity.DEFAULT_OFFSET_X)
+            overlayManager.setPositionOffsetX(currentOffsetX)
+            DebugLog.add(TAG, "Initial X-Offset set for OverlayManager: $currentOffsetX")
+
             if (isOverlayVisuallyEnabledState) {
                 overlayManager.showOverlay()
                 mainHandler.postDelayed(processActiveWindowRunnable, 500)
@@ -196,7 +210,7 @@ class DroidrunPortalService : AccessibilityService() {
             }
 
             mainHandler.postDelayed(updateOverlayVisualizationRunnable, REFRESH_INTERVAL_MS)
-            DebugLog.add(TAG, "onCreate: Service initialized. Overlay visible: $isOverlayVisuallyEnabledState, Offset: $currentOffset")
+            DebugLog.add(TAG, "onCreate: Service initialized. Overlay visible: $isOverlayVisuallyEnabledState, Y-Offset: $currentYOffset, X-Offset: $currentOffsetX")
 
         } catch (e: Exception) {
             DebugLog.add(TAG, "Error during service onCreate: ${e.message}")
@@ -317,29 +331,33 @@ class DroidrunPortalService : AccessibilityService() {
 
         executeAction(actionToExecute) // This is synchronous
 
+        val delayMillis = if (actionToExecute.type.equals("click", ignoreCase = true)) {
+            DebugLog.add(TAG, "Post-action: 'click' detected, using longer delay (3s) for potential app load.")
+            3000L
+        } else {
+            1000L
+        }
+
         // After action, re-evaluate by asking Gemini for next steps with new context
-        // This delay is crucial to allow the UI to settle after an action, especially for apps
-        // that have loading times or animations. Increased from 1000ms to 2000ms
-        // to give more time for slower apps or network operations to complete.
         mainHandler.postDelayed({
             if (isProcessingMultiStep) {
-                DebugLog.add(TAG, "Post-action delay complete for '$currentOriginalCommand'. Requesting next step from Gemini (CONTINUATION_VALIDATE).")
+                DebugLog.add(TAG, "Post-action delay ($delayMillis ms) complete for '$currentOriginalCommand'. Requesting next step from Gemini (CONTINUATION_VALIDATE).")
                 mainHandler.post { processActiveWindow() }
                 mainHandler.postDelayed({
                     val newUiContext = getCurrentElementsJson()
                     lastKnownUiContext = newUiContext
-                    DebugLog.add(TAG, "  Calling makeGeminiRequest (CONTINUATION_VALIDATE, after action). LastAction: ${actionToExecute.type}, NextPlanned (from old queue, if any): ${pendingActionsQueue.firstOrNull()?.type ?: "null"}. UI Hash: ${newUiContext.hashCode()}")
+                    DebugLog.add(TAG, "  Calling makeGeminiRequest (CONTINUATION_VALIDATE, after action). LastAction: ${actionToExecute.type}, NextPlanned: ${pendingActionsQueue.firstOrNull()?.type ?: "null"}. UI Hash: ${newUiContext.hashCode()}")
                     geminiProcessor.makeGeminiRequest(
                         GeminiCommandProcessor.PromptType.CONTINUATION_VALIDATE,
                         currentOriginalCommand!!, newUiContext, actionToExecute,
-                        pendingActionsQueue.firstOrNull(), // This is the key: pass the next from the *original* batch
+                        pendingActionsQueue.firstOrNull(),
                         geminiActionCallback
                     )
-                }, 200) // Delay for screen capture
+                }, 200) // This internal 200ms delay is for screen capture after processActiveWindow
             } else {
-                 DebugLog.add(TAG, "Post-action delay: No longer processing multi-step for '$currentOriginalCommand'. Not continuing.")
+                 DebugLog.add(TAG, "Post-action delay ($delayMillis ms): No longer processing multi-step for '$currentOriginalCommand'. Not continuing.")
             }
-        }, 2000) // UI settle delay - Increased to 2 seconds
+        }, delayMillis) // Use the new conditional delayMillis here
     }
     
     private fun processVoiceCommand(command: String) {
@@ -351,7 +369,18 @@ class DroidrunPortalService : AccessibilityService() {
         DebugLog.add(TAG, "executeAction: Type=${action.type}, Index=${action.elementIndex}, Text='${action.text}', XY=(${action.x},${action.y}), Dir='${action.direction}'")
         try {
             when (action.type.lowercase()) {
-                "click" -> if (action.elementIndex >= 0) clickElementByIndex(action.elementIndex) else if (action.x >= 0 && action.y >= 0) clickAtCoordinates(action.x, action.y) else DebugLog.add(TAG, "Click action invalid: no index or coordinates.")
+                "click" -> if (action.elementIndex >= 0) clickElementByIndex(action.elementIndex)
+                           else if (action.x >= 0 && action.y >= 0) {
+                               var adjustedX = action.x
+                               if (::overlayManager.isInitialized) {
+                                   val offsetX = overlayManager.getPositionOffsetX()
+                                   adjustedX -= offsetX // Adjust for current X offset
+                                   DebugLog.add(TAG, "Adjusting click X-coordinate: original=${action.x}, offset=$offsetX, new=$adjustedX")
+                               } else {
+                                   DebugLog.add(TAG, "OverlayManager not init for X-offset, using original X: ${action.x}")
+                               }
+                               clickAtCoordinates(adjustedX, action.y)
+                           } else DebugLog.add(TAG, "Click action invalid: no index or coordinates.")
                 "type" -> if (action.elementIndex >= 0) typeInElement(action.elementIndex, action.text) else DebugLog.add(TAG, "Type action invalid: no elementIndex.")
                 "scroll" -> performScroll(action.direction)
                 "swipe" -> performSwipe(action.direction)
@@ -397,57 +426,18 @@ class DroidrunPortalService : AccessibilityService() {
     }
     
     private fun performScroll(direction: String) {
-        val scrollableNode = findFirstScrollableNode(rootInActiveWindow)
-        if (scrollableNode == null) {
-            DebugLog.add(TAG, "No scrollable node found to perform scroll $direction.")
-            // Attempt to scroll on root if no specific scrollable node is found
-            val rootActionCode = when (direction.lowercase()) {
-                "up" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
-                "down" -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
-                "left" -> AccessibilityNodeInfo.ACTION_SCROLL_LEFT
-                "right" -> AccessibilityNodeInfo.ACTION_SCROLL_RIGHT
-                else -> { DebugLog.add(TAG, "Unknown scroll direction for root: $direction"); return }
-            }
-            if (rootInActiveWindow?.getActionList()?.contains(AccessibilityNodeInfo.AccessibilityAction(rootActionCode, null)) == true) {
-                rootInActiveWindow?.performAction(rootActionCode)
-                DebugLog.add(TAG, "Performed scroll $direction on root window.")
-            } else {
-                DebugLog.add(TAG, "Scroll $direction not supported by root window or root is null.")
-            }
-            return
-        }
-
-        val actionCode: Int? = when (direction.lowercase()) {
+        val actionCode = when (direction.lowercase()) {
             "up" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
             "down" -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
-            "left" -> AccessibilityNodeInfo.ACTION_SCROLL_LEFT
-            "right" -> AccessibilityNodeInfo.ACTION_SCROLL_RIGHT
-            else -> {
-                DebugLog.add(TAG, "Unknown scroll direction: $direction")
-                null
-            }
+            "left" -> { DebugLog.add(TAG, "Horizontal scroll (left) requested, defaulting to SCROLL_BACKWARD (up)."); AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD }
+            "right" -> { DebugLog.add(TAG, "Horizontal scroll (right) requested, defaulting to SCROLL_FORWARD (down)."); AccessibilityNodeInfo.ACTION_SCROLL_FORWARD }
+            else -> { DebugLog.add(TAG, "Unknown scroll direction: $direction"); return }
         }
-
-        if (actionCode != null) {
-            // Check if the node supports the specific scroll action
-            val supportedActions = scrollableNode.actionList
-            val desiredAction = AccessibilityNodeInfo.AccessibilityAction(actionCode, null)
-
-            if (supportedActions.contains(desiredAction)) {
-                scrollableNode.performAction(actionCode)
-                DebugLog.add(TAG, "Performed scroll $direction on specific node.")
-            } else {
-                // Fallback for horizontal scroll if specific action not available, e.g. could try swipe
-                // For now, just log if the specific horizontal action isn't available
-                if (direction.lowercase() == "left" || direction.lowercase() == "right") {
-                    DebugLog.add(TAG, "Scroll $direction (action $actionCode) not directly supported by the node. Consider swipe as fallback.")
-                    // Optionally, could attempt swipe here: performSwipe(direction)
-                } else {
-                    // For vertical scrolls, if specific up/down not found, it's unusual.
-                    // The old code would have tried on root, which is now handled if scrollableNode is null initially.
-                    DebugLog.add(TAG, "Scroll $direction (action $actionCode) not supported by the identified scrollable node.")
-                }
-            }
+        val scrollableNode = findFirstScrollableNode(rootInActiveWindow)
+        if (scrollableNode != null) {
+            scrollableNode.performAction(actionCode); DebugLog.add(TAG, "Performed scroll $direction on specific node.")
+        } else {
+            rootInActiveWindow?.performAction(actionCode); DebugLog.add(TAG, "Performed scroll $direction on root window.")
         }
     }
 
@@ -688,10 +678,17 @@ class DroidrunPortalService : AccessibilityService() {
         params.y = 300
 
         floatingVoiceButton?.setOnClickListener {
-            val intent = Intent(this, VoiceCommandActivity::class.java)
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            startActivity(intent)
-            DebugLog.add(TAG, "Floating voice button clicked, launching VoiceCommandActivity.")
+            DebugLog.add(TAG, "Floating voice button onClick: Listener triggered.")
+            try {
+                val intent = Intent(this, VoiceCommandActivity::class.java)
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                DebugLog.add(TAG, "Floating voice button onClick: Intent created for VoiceCommandActivity. Starting activity...")
+                startActivity(intent)
+                DebugLog.add(TAG, "Floating voice button onClick: startActivity(intent) called successfully.")
+            } catch (e: Exception) {
+                DebugLog.add(TAG, "Floating voice button onClick: EXCEPTION while trying to start VoiceCommandActivity: ${e.message}")
+                Log.e(TAG, "Error starting VoiceCommandActivity from FAB", e) // Standard log for stack trace
+            }
         }
 
         floatingVoiceButton?.setOnTouchListener(object : View.OnTouchListener {
