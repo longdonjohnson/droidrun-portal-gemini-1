@@ -142,79 +142,80 @@ class GeminiCommandProcessor(private val context: Context) {
     }
     
     private suspend fun callGeminiAPI(prompt: String, apiUrl: String): String {
-        DebugLog.add(TAG, "callGeminiAPI with URL: $apiUrl")
-        var currentDelay = INITIAL_BACKOFF_MS
+        DebugLog.add(TAG, "callGeminiAPI started. URL: $apiUrl, Max Retries: $MAX_RETRIES")
+        var currentDelayMs = INITIAL_BACKOFF_MS
+        var lastCaughtException: Exception? = null
+
         for (attempt in 1..MAX_RETRIES) {
+            DebugLog.add(TAG, "callGeminiAPI: Attempt $attempt/$MAX_RETRIES")
             try {
-                return withContext(Dispatchers.IO) {
-                    val url = URL("$apiUrl?key=$API_KEY")
-                    val connection = url.openConnection() as HttpURLConnection
-                    connection.connectTimeout = 10000 // 10 seconds
-                    connection.readTimeout = 10000    // 10 seconds
+                val url = URL("$apiUrl?key=$API_KEY")
+                val connection = url.openConnection() as HttpURLConnection
+                connection.connectTimeout = 15000 // 15 seconds
+                connection.readTimeout = 15000    // 15 seconds
+                connection.requestMethod = "POST"
+                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                connection.doOutput = true
 
-                    connection.requestMethod = "POST"
-                    connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                    connection.doOutput = true
-
-                    val requestBodyJson = JSONObject().apply {
-                        put("contents", JSONArray().apply {
-                            put(JSONObject().apply {
-                                put("parts", JSONArray().apply {
-                                    put(JSONObject().apply {
-                                        put("text", prompt)
-                                    })
-                                })
+                val requestBodyJson = JSONObject().apply {
+                    put("contents", JSONArray().apply {
+                        put(JSONObject().apply {
+                            put("parts", JSONArray().apply {
+                                put(JSONObject().apply { put("text", prompt) })
                             })
                         })
-                    }
-                    val requestBodyString = requestBodyJson.toString()
-                    DebugLog.add(TAG, "Gemini request body (attempt $attempt): $requestBodyString")
+                    })
+                }
+                val requestBodyString = requestBodyJson.toString()
+                DebugLog.add(TAG, "callGeminiAPI: Request body (attempt $attempt): ${requestBodyString.take(200)}...") // Log snippet
 
-                    connection.outputStream.use { os ->
-                        os.write(requestBodyString.toByteArray(Charsets.UTF_8))
-                    }
+                connection.outputStream.use { os -> os.write(requestBodyString.toByteArray(Charsets.UTF_8)) }
 
-                    val responseCode = connection.responseCode
-                    if (responseCode == HttpURLConnection.HTTP_OK) {
-                        val responseBody = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                        DebugLog.add(TAG, "Gemini raw response (attempt $attempt): $responseBody")
-                        return@withContext responseBody
-                    } else {
-                        val errorContent = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: "No error content"
-                        DebugLog.add(TAG, "Gemini API call failed on attempt $attempt with code: $responseCode, error: $errorContent")
-                        if (attempt == MAX_RETRIES) {
-                            throw GeminiApiException("API call failed after $MAX_RETRIES attempts with code: $responseCode. Last error: $errorContent", responseCode = responseCode)
-                        }
-                        // Continue to retry logic below
-                    }
+                val responseCode = connection.responseCode
+                DebugLog.add(TAG, "callGeminiAPI: Attempt $attempt, Response Code: $responseCode")
+
+                if (responseCode == HttpURLConnection.HTTP_OK) {
+                    // Successfully received a response
+                    val responseBody = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    DebugLog.add(TAG, "callGeminiAPI: Attempt $attempt successful. Response body (first 200 chars): ${responseBody.take(200)}...")
+                    return responseBody // Return successful response
+                } else {
+                    // Handle non-OK HTTP responses
+                    val rawErrorText = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.readText()
+                    val errorContent = if (rawErrorText.isNullOrBlank()) "No error content from stream" else rawErrorText
+                    DebugLog.add(TAG, "callGeminiAPI: Attempt $attempt failed. HTTP Code: $responseCode, Error Content: $errorContent")
+                    lastCaughtException = GeminiApiException("HTTP Error: $responseCode - $errorContent", responseCode = responseCode)
+                    // If it's the last attempt, this exception will be thrown after the loop if no success.
                 }
             } catch (e: UnknownHostException) {
-                DebugLog.add(TAG, "Gemini API call attempt $attempt failed: UnknownHostException - ${e.message}")
-                if (attempt == MAX_RETRIES) {
-                    throw GeminiApiException("API call failed after $MAX_RETRIES attempts due to UnknownHostException: ${e.message}", originalException = e)
-                }
+                DebugLog.add(TAG, "callGeminiAPI: Attempt $attempt failed with UnknownHostException: ${e.message}")
+                lastCaughtException = e
             } catch (e: SocketTimeoutException) {
-                DebugLog.add(TAG, "Gemini API call attempt $attempt failed: SocketTimeoutException - ${e.message}")
-                if (attempt == MAX_RETRIES) {
-                    throw GeminiApiException("API call failed after $MAX_RETRIES attempts due to SocketTimeoutException: ${e.message}", originalException = e)
-                }
-            } catch (e: GeminiApiException) { // Catch already wrapped GeminiApiException to rethrow if it's the last attempt
-                 if (attempt == MAX_RETRIES) throw e
-                 // else it was a non-network http error, retry logic will apply
-            } catch (e: Exception) { // Catch any other unexpected exceptions during the API call
-                DebugLog.add(TAG, "Gemini API call attempt $attempt failed with unexpected exception: ${e.message}")
-                Log.e(TAG, "Unexpected exception in callGeminiAPI attempt $attempt", e)
-                if (attempt == MAX_RETRIES) {
-                    throw GeminiApiException("API call failed after $MAX_RETRIES attempts due to an unexpected error: ${e.message}", originalException = e)
-                }
+                DebugLog.add(TAG, "callGeminiAPI: Attempt $attempt failed with SocketTimeoutException: ${e.message}")
+                lastCaughtException = e
+            } catch (e: Exception) { // Catch any other unexpected exceptions
+                DebugLog.add(TAG, "callGeminiAPI: Attempt $attempt failed with unexpected exception: ${e.message}")
+                Log.e(TAG, "callGeminiAPI: Unexpected exception in attempt $attempt", e) // Keep Log.e for stacktrace
+                lastCaughtException = e
             }
 
-            DebugLog.add(TAG, "Retrying Gemini API call. Waiting for $currentDelay ms.")
-            delay(currentDelay)
-            currentDelay *= 2 // Exponential backoff
+            // If this is the last attempt and it failed (didn't return success), prepare to throw.
+            if (attempt == MAX_RETRIES) {
+                DebugLog.add(TAG, "callGeminiAPI: Max retries ($MAX_RETRIES) reached. Throwing last known error.")
+                val finalMessage = "API call failed after $MAX_RETRIES attempts. Last error: ${lastCaughtException?.message ?: "Unknown error"}"
+                throw GeminiApiException(finalMessage, originalException = lastCaughtException, responseCode = (lastCaughtException as? GeminiApiException)?.responseCode)
+            }
+
+            DebugLog.add(TAG, "callGeminiAPI: Attempt $attempt failed. Waiting for $currentDelayMs ms before retrying.")
+            delay(currentDelayMs)
+            currentDelayMs *= 2 // Exponential backoff
         }
-        // Should not be reached if MAX_RETRIES > 0, but as a fallback:
-        throw GeminiApiException("API call failed after $MAX_RETRIES attempts. Unknown error.")
+
+        // Fallback, should ideally be unreachable if MAX_RETRIES >= 1 due to the throw in the loop on the last attempt.
+        // However, it makes the compiler happy that all paths return or throw.
+        val finalFallbackMessage = "API call failed after $MAX_RETRIES attempts (loop completed unexpectedly). Last error: ${lastCaughtException?.message ?: "Unknown error"}"
+        DebugLog.add(TAG, "callGeminiAPI: Loop completed without success or specific throw on last attempt. Fallback throw.")
+        throw GeminiApiException(finalFallbackMessage, originalException = lastCaughtException, responseCode = (lastCaughtException as? GeminiApiException)?.responseCode ?: -1)
     }
     
     private fun parseResponse(response: String): List<UIAction> {

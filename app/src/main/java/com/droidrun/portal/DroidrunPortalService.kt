@@ -581,11 +581,16 @@ class DroidrunPortalService : AccessibilityService() {
     private fun performScroll(direction: String) {
         // Called by handleActionScroll, error handling there.
         DebugLog.add(TAG, "performScroll: Attempting scroll in direction: $direction")
+        // Using ACTION_SCROLL_BACKWARD for 'left' and ACTION_SCROLL_FORWARD for 'right'
+        // as general scroll actions. Specific left/right actions might have compatibility issues
+        // or not be universally supported by all views for horizontal scrolling via these constants.
+        // ACTION_SCROLL_FORWARD/BACKWARD are more commonly implemented for vertical or list scrolling,
+        // but can sometimes work for horizontal if the view is focused and designed for it.
         val actionCode = when (direction.lowercase()) {
             "up" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
             "down" -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
-            "left" -> AccessibilityNodeInfo.ACTION_SCROLL_LEFT // Corrected
-            "right" -> AccessibilityNodeInfo.ACTION_SCROLL_RIGHT // Corrected
+            "left" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD // Changed from ACTION_SCROLL_LEFT
+            "right" -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD // Changed from ACTION_SCROLL_RIGHT
             else -> {
                 DebugLog.add(TAG, "performScroll: Unknown scroll direction: $direction. Not performing action.")
                 return
