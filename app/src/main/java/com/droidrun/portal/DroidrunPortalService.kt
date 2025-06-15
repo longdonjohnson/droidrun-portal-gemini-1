@@ -1002,15 +1002,17 @@ class DroidrunPortalService : AccessibilityService() {
 
         floatingVoiceButton?.setOnClickListener {
             DebugLog.add(TAG, "Floating voice button onClick: Listener triggered.")
+            val intent = Intent(this@DroidrunPortalService, VoiceCommandActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            DebugLog.add(TAG, "Floating voice button onClick: Intent created for VoiceCommandActivity. Flags: ${intent.flags}")
             try {
-                val intent = Intent(this, VoiceCommandActivity::class.java)
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                DebugLog.add(TAG, "Floating voice button onClick: Intent created for VoiceCommandActivity. Starting activity...")
+                DebugLog.add(TAG, "Floating voice button onClick: Attempting to start VoiceCommandActivity...")
                 startActivity(intent)
-                DebugLog.add(TAG, "Floating voice button onClick: startActivity(intent) called successfully.")
+                DebugLog.add(TAG, "Floating voice button onClick: startActivity(VoiceCommandActivity) called successfully.")
             } catch (e: Exception) {
-                DebugLog.add(TAG, "Floating voice button onClick: EXCEPTION while trying to start VoiceCommandActivity: ${e.message}")
-                Log.e(TAG, "Error starting VoiceCommandActivity from FAB", e) // Standard log for stack trace
+                DebugLog.add(TAG, "Floating voice button onClick: EXCEPTION while trying to start VoiceCommandActivity: ${e.toString()}")
+                // Log.e(TAG, "Error starting VoiceCommandActivity from FAB", e) // Replaced by DebugLog with e.toString()
             }
         }
 
@@ -1038,7 +1040,7 @@ class DroidrunPortalService : AccessibilityService() {
              windowManagerService.addView(floatingVoiceButton, params)
              DebugLog.add(TAG, "Floating voice button added to window.")
         } catch (e: Exception) {
-             DebugLog.add(TAG, "Error adding floating voice button: ${e.message}")
+             DebugLog.add(TAG, "Error adding floating voice button: ${e.toString()}") // Changed to e.toString()
              isFloatingButtonActuallyShown = false; floatingVoiceButton = null;
         }
     }
@@ -1050,7 +1052,7 @@ class DroidrunPortalService : AccessibilityService() {
                 windowManagerService.removeView(floatingVoiceButton)
                 DebugLog.add(TAG, "Floating voice button removed from window.")
             } catch (e: Exception) {
-                 DebugLog.add(TAG, "Error removing floating voice button: ${e.message}")
+                 DebugLog.add(TAG, "Error removing floating voice button: ${e.toString()}") // Changed to e.toString()
             }
             floatingVoiceButton = null
         }
