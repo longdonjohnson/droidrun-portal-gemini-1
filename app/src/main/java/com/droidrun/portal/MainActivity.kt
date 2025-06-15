@@ -84,8 +84,8 @@ class MainActivity : AppCompatActivity() {
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        DebugLog.add(TAG, "onCreate: Activity creating...")
         setContentView(R.layout.activity_main)
-        DebugLog.add(TAG, "onCreate called")
         
         statusText = findViewById(R.id.status_text)
         responseText = findViewById(R.id.response_text)
@@ -100,120 +100,163 @@ class MainActivity : AppCompatActivity() {
 
         val filter = IntentFilter(DroidrunPortalService.ACTION_ELEMENTS_RESPONSE)
         val receiverFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Context.RECEIVER_EXPORTED else 0
-        registerReceiver(elementDataReceiver, filter, null, mainHandler, receiverFlags) // Use mainHandler for broadcasts on main thread
+        registerReceiver(elementDataReceiver, filter, null, mainHandler, receiverFlags)
+        DebugLog.add(TAG, "onCreate: elementDataReceiver registered for action ${DroidrunPortalService.ACTION_ELEMENTS_RESPONSE}")
         
-        fetchButton.setOnClickListener { fetchElementData() }
-        retriggerButton.setOnClickListener { retriggerElements() }
-        launchVoiceCommandButton.setOnClickListener { // Re-enabled, no safe call
+        fetchButton.setOnClickListener {
+            DebugLog.add(TAG, "Fetch Element Data button clicked")
+            fetchElementData()
+        }
+        retriggerButton.setOnClickListener {
+            DebugLog.add(TAG, "Retrigger Elements button clicked")
+            retriggerElements()
+        }
+        launchVoiceCommandButton.setOnClickListener {
             DebugLog.add(TAG, "Launch Voice Command button clicked.")
             val voiceIntent = Intent(this, VoiceCommandActivity::class.java)
             startActivity(voiceIntent)
         }
         
         headerCard.setOnClickListener {
+            // Tap counting logic...
             val currentTime = System.currentTimeMillis()
             if (currentTime - lastTapTime < TAP_TIMEOUT) {
                 tapCount++
             } else {
-                tapCount = 1
+                tapCount = 1 // Reset count
             }
             lastTapTime = currentTime
-            DebugLog.add(TAG, "Header card tapped. Count: $tapCount")
+            // DebugLog.add(TAG, "Header card tapped. Current tap count: $tapCount") // Can be noisy
             if (tapCount == REQUIRED_TAPS) {
-                tapCount = 0
-                DebugLog.add(TAG, "Debug menu gesture detected. Showing fragment.")
+                tapCount = 0 // Reset after triggering
+                DebugLog.add(TAG, "Header card: Debug menu gesture detected ($REQUIRED_TAPS taps). Showing fragment.")
                 val debugMenu = DebugMenuFragment.newInstance(this)
                 debugMenu.show(supportFragmentManager, DebugMenuFragment.TAG)
             }
         }
         
-        accessibilityStatusContainer.setOnClickListener { openAccessibilitySettings() }
+        accessibilityStatusContainer.setOnClickListener {
+            DebugLog.add(TAG, "Accessibility Status container clicked, opening settings.")
+            openAccessibilitySettings()
+        }
 
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
         isOverlayActuallyVisibleState = prefs.getBoolean(KEY_OVERLAY_VISIBLE, true)
-        DebugLog.add(TAG, "Initial overlay visibility from prefs: $isOverlayActuallyVisibleState. Notifying service.")
-        // Call the method that also broadcasts, to ensure service syncs if it missed the initial state from its own onCreate
-        toggleOverlayVisibilityExternally(isOverlayActuallyVisibleState)
+        DebugLog.add(TAG, "onCreate: Initial overlay visibility from prefs: $isOverlayActuallyVisibleState.")
+        // Call the method that also broadcasts, to ensure service syncs
+        toggleOverlayVisibilityExternally(isOverlayActuallyVisibleState) // Log inside this method
 
         val shouldShowFabInitially = prefs.getBoolean(KEY_FLOATING_BUTTON_VISIBLE, false)
-        DebugLog.add(TAG, "Initial FAB state from prefs: $shouldShowFabInitially. Notifying service.")
-        setFloatingVoiceButtonVisibility(shouldShowFabInitially)
+        DebugLog.add(TAG, "onCreate: Initial FAB state from prefs: $shouldShowFabInitially.")
+        setFloatingVoiceButtonVisibility(shouldShowFabInitially) // Log inside this method
 
         val initialOffset = prefs.getInt(KEY_OVERLAY_OFFSET, DEFAULT_OFFSET)
-        DebugLog.add(TAG, "Initial offset from prefs: $initialOffset. Notifying service.")
-        setNewOverlayOffset(initialOffset) // This saves to prefs (redundantly here) and broadcasts
+        DebugLog.add(TAG, "onCreate: Initial Y-offset from prefs: $initialOffset.")
+        setNewOverlayOffset(initialOffset) // Log inside this method
 
         val initialOffsetX = prefs.getInt(KEY_OVERLAY_OFFSET_X, DEFAULT_OFFSET_X)
-        DebugLog.add(TAG, "Initial X-offset from prefs: $initialOffsetX. Notifying service.")
-        setNewOverlayOffsetX(initialOffsetX)
+        DebugLog.add(TAG, "onCreate: Initial X-offset from prefs: $initialOffsetX.")
+        setNewOverlayOffsetX(initialOffsetX) // Log inside this method
 
-        updateAccessibilityStatusIndicator()
+        updateAccessibilityStatusIndicator() // Log inside this method
+        DebugLog.add(TAG, "onCreate: Activity creation complete.")
     }
 
     // getMainLooper() for registerReceiver
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
 
+    override fun onStart() {
+        super.onStart()
+        DebugLog.add(TAG, "onStart called")
+    }
+
     override fun onResume() {
         super.onResume()
-        DebugLog.add(TAG, "onResume called")
-        updateAccessibilityStatusIndicator()
+        DebugLog.add(TAG, "onResume: Activity resuming.")
+        updateAccessibilityStatusIndicator() // Log inside this method
+        // Refresh overlay state from prefs in case it was changed while activity was paused
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        isOverlayActuallyVisibleState = prefs.getBoolean(KEY_OVERLAY_VISIBLE, true)
-        DebugLog.add(TAG, "Overlay visible state refreshed from prefs in onResume: $isOverlayActuallyVisibleState")
+        val refreshedOverlayState = prefs.getBoolean(KEY_OVERLAY_VISIBLE, true)
+        if (isOverlayActuallyVisibleState != refreshedOverlayState) {
+            DebugLog.add(TAG, "onResume: Overlay visibility state changed in Prefs from $isOverlayActuallyVisibleState to $refreshedOverlayState. Updating local state.")
+            isOverlayActuallyVisibleState = refreshedOverlayState
+            // No need to call toggleOverlayVisibilityExternally here if DebugMenuFragment is the only modifier when activity is paused
+            // as it directly updates prefs and broadcasts. If other mechanisms could change it, a sync call might be needed.
+        } else {
+            DebugLog.add(TAG, "onResume: Overlay visibility state ($isOverlayActuallyVisibleState) consistent with Prefs.")
+        }
+        DebugLog.add(TAG, "onResume: Activity resumed.")
+    }
+
+    override fun onPause() {
+        super.onPause()
+        DebugLog.add(TAG, "onPause called")
+    }
+
+    override fun onStop() {
+        super.onStop()
+        DebugLog.add(TAG, "onStop called")
     }
     
     override fun onDestroy() {
         super.onDestroy()
-        DebugLog.add(TAG, "onDestroy called")
+        DebugLog.add(TAG, "onDestroy: Activity destroying.")
         try {
             unregisterReceiver(elementDataReceiver)
+            DebugLog.add(TAG, "onDestroy: elementDataReceiver unregistered successfully.")
         } catch (e: IllegalArgumentException) {
-            DebugLog.add(TAG, "Receiver not registered or already unregistered: ${e.message}")
+            DebugLog.add(TAG, "onDestroy: elementDataReceiver was not registered or already unregistered: ${e.message}")
         }
+        DebugLog.add(TAG, "onDestroy: Activity destroyed.")
     }
     
     private fun fetchElementData() {
-        DebugLog.add(TAG, "fetchElementData called")
+        DebugLog.add(TAG, "fetchElementData: Requesting element data from service.")
         try {
             val intent = Intent(DroidrunPortalService.ACTION_GET_ELEMENTS)
-            intent.setPackage(packageName)
+            intent.setPackage(packageName) // Important for explicit broadcast
             sendBroadcast(intent)
-            statusText.text = "Requesting element data..."
+            statusText.text = "Requesting element data..." // UI update
         } catch (e: Exception) {
-            statusText.text = "Error sending request: ${e.message}"
-            DebugLog.add(TAG, "Error sending ${DroidrunPortalService.ACTION_GET_ELEMENTS}: ${e.message}")
+            statusText.text = "Error sending request: ${e.message}" // UI update
+            DebugLog.add(TAG, "fetchElementData: Error sending ${DroidrunPortalService.ACTION_GET_ELEMENTS} broadcast: ${e.message}")
+            Log.e(TAG, "fetchElementData broadcast error", e)
         }
     }
 
     private fun retriggerElements() {
-        DebugLog.add(TAG, "retriggerElements called")
+        DebugLog.add(TAG, "retriggerElements: Requesting element retrigger from service.")
         try {
             val intent = Intent(DroidrunPortalService.ACTION_RETRIGGER_ELEMENTS)
-            intent.setPackage(packageName)
+            intent.setPackage(packageName) // Important for explicit broadcast
             sendBroadcast(intent)
-            statusText.text = "Refreshing UI elements..."
+            statusText.text = "Refreshing UI elements..." // UI update
         } catch (e: Exception) {
-            statusText.text = "Error refreshing elements: ${e.message}"
-            DebugLog.add(TAG, "Error sending ${DroidrunPortalService.ACTION_RETRIGGER_ELEMENTS}: ${e.message}")
+            statusText.text = "Error refreshing elements: ${e.message}" // UI update
+            DebugLog.add(TAG, "retriggerElements: Error sending ${DroidrunPortalService.ACTION_RETRIGGER_ELEMENTS} broadcast: ${e.message}")
+            Log.e(TAG, "retriggerElements broadcast error", e)
         }
     }
 
     private fun isAccessibilityServiceEnabled(): Boolean {
         val accessibilityServiceName = "$packageName/${DroidrunPortalService::class.java.canonicalName}"
+        // DebugLog.add(TAG, "isAccessibilityServiceEnabled: Checking for service: $accessibilityServiceName") // Can be noisy
         try {
             val enabledServices = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
-            return enabledServices?.contains(accessibilityServiceName) == true
+            val isEnabled = enabledServices?.contains(accessibilityServiceName) == true
+            // DebugLog.add(TAG, "isAccessibilityServiceEnabled: Enabled services: $enabledServices, result for $accessibilityServiceName: $isEnabled") // Can be very noisy
+            return isEnabled
         } catch (e: Exception) {
-            DebugLog.add(TAG, "Error checking accessibility status: ${e.message}")
-            Log.e(TAG, "Error checking accessibility status", e)
+            DebugLog.add(TAG, "isAccessibilityServiceEnabled: Error checking accessibility status: ${e.message}")
+            Log.e(TAG, "isAccessibilityServiceEnabled: Error", e)
             return false
         }
     }
 
     private fun updateAccessibilityStatusIndicator() {
         val isEnabled = isAccessibilityServiceEnabled()
-        DebugLog.add(TAG, "updateAccessibilityStatusIndicator: service enabled = $isEnabled")
+        DebugLog.add(TAG, "updateAccessibilityStatusIndicator: Accessibility service enabled: $isEnabled")
         if (isEnabled) {
             accessibilityIndicator.setBackgroundResource(R.drawable.circle_indicator_green)
             accessibilityStatusText.text = "ENABLED"
@@ -224,42 +267,41 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openAccessibilitySettings() {
-        DebugLog.add(TAG, "openAccessibilitySettings called")
+        DebugLog.add(TAG, "openAccessibilitySettings: Opening accessibility settings.")
         try {
             val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
             startActivity(intent)
             Toast.makeText(this, "Please enable Droidrun Portal in Accessibility Services", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
-            DebugLog.add(TAG, "Error opening accessibility settings: ${e.message}")
-            Log.e(TAG, "Error opening accessibility settings", e)
+            DebugLog.add(TAG, "openAccessibilitySettings: Error opening settings: ${e.message}")
+            Log.e(TAG, "openAccessibilitySettings: Error", e)
             Toast.makeText(this, "Error opening accessibility settings", Toast.LENGTH_SHORT).show()
         }
     }
 
     // --- Methods for DebugMenuFragment ---
     fun isOverlayCurrentlyVisible(): Boolean {
-        // Read from the state variable which is kept in sync with SharedPreferences
-        DebugLog.add(TAG, "DebugMenuFragment queried isOverlayCurrentlyVisible: $isOverlayActuallyVisibleState")
+        DebugLog.add(TAG, "DebugMenu: isOverlayCurrentlyVisible queried, returning: $isOverlayActuallyVisibleState")
         return isOverlayActuallyVisibleState
     }
 
     fun getCurrentOffset(): Int { // This is for Y-offset
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val offset = prefs.getInt(KEY_OVERLAY_OFFSET, DEFAULT_OFFSET)
-        DebugLog.add(TAG, "DebugMenuFragment queried getCurrentOffset (Y) from Prefs: $offset")
+        DebugLog.add(TAG, "DebugMenu: getCurrentOffset (Y) from Prefs, returning: $offset")
         return offset
     }
 
     fun getCurrentOffsetX(): Int {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val offsetX = prefs.getInt(KEY_OVERLAY_OFFSET_X, DEFAULT_OFFSET_X)
-        DebugLog.add(TAG, "getCurrentOffsetX returning from Prefs: $offsetX")
+        DebugLog.add(TAG, "DebugMenu: getCurrentOffsetX from Prefs, returning: $offsetX")
         return offsetX
     }
 
     fun setNewOverlayOffset(newOffset: Int) { // This is for Y-offset
         val boundedOffset = newOffset.coerceIn(MIN_OFFSET, MAX_OFFSET)
-        DebugLog.add(TAG, "setNewOverlayOffset (from DebugMenu) called with: $newOffset, bounded to: $boundedOffset")
+        DebugLog.add(TAG, "DebugMenu: setNewOverlayOffset (Y) called with: $newOffset, bounded to: $boundedOffset")
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putInt(KEY_OVERLAY_OFFSET, boundedOffset).apply()
 
@@ -267,13 +309,12 @@ class MainActivity : AppCompatActivity() {
         intent.setPackage(packageName)
         intent.putExtra(EXTRA_OVERLAY_OFFSET, boundedOffset)
         sendBroadcast(intent)
-        DebugLog.add(TAG, "Overlay Y-offset updated to $boundedOffset by DebugMenu and broadcasted to service.")
+        DebugLog.add(TAG, "DebugMenu: Overlay Y-offset updated to $boundedOffset, saved to Prefs and broadcasted.")
     }
 
     fun setNewOverlayOffsetX(newOffsetX: Int) {
-        // Assuming MIN_OFFSET and MAX_OFFSET can apply to X offset too, or define new X-specific min/max
         val boundedOffsetX = newOffsetX.coerceIn(MIN_OFFSET, MAX_OFFSET) // Using existing MIN/MAX for now
-        DebugLog.add(TAG, "setNewOverlayOffsetX (from DebugMenu) called with: $newOffsetX, bounded to: $boundedOffsetX")
+        DebugLog.add(TAG, "DebugMenu: setNewOverlayOffsetX called with: $newOffsetX, bounded to: $boundedOffsetX")
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putInt(KEY_OVERLAY_OFFSET_X, boundedOffsetX).apply()
 
@@ -281,59 +322,53 @@ class MainActivity : AppCompatActivity() {
         intent.setPackage(packageName)
         intent.putExtra(EXTRA_OVERLAY_OFFSET_X, boundedOffsetX)
         sendBroadcast(intent)
-        DebugLog.add(TAG, "Overlay X-offset updated to $boundedOffsetX by DebugMenu and broadcasted to service.")
+        DebugLog.add(TAG, "DebugMenu: Overlay X-offset updated to $boundedOffsetX, saved to Prefs and broadcasted.")
     }
 
     fun toggleOverlayVisibilityExternally(show: Boolean) {
-        DebugLog.add(TAG, "DebugMenuFragment called toggleOverlayVisibilityExternally with: $show")
+        DebugLog.add(TAG, "DebugMenu: toggleOverlayVisibilityExternally called with: $show")
         isOverlayActuallyVisibleState = show
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putBoolean(KEY_OVERLAY_VISIBLE, show).apply()
-        DebugLog.add(TAG, "Overlay visibility set to $show, saved to prefs (KEY_OVERLAY_VISIBLE).")
+        DebugLog.add(TAG, "DebugMenu: Overlay visibility set to $show, saved to Prefs (KEY_OVERLAY_VISIBLE).")
 
         val intent = Intent(DroidrunPortalService.ACTION_TOGGLE_OVERLAY)
         intent.setPackage(packageName)
         intent.putExtra(DroidrunPortalService.EXTRA_OVERLAY_VISIBLE, show)
         sendBroadcast(intent)
-        DebugLog.add(TAG, "Overlay visibility toggle broadcasted to service: $show")
+        DebugLog.add(TAG, "DebugMenu: Overlay visibility toggle broadcasted to service: $show")
     }
 
     fun setFloatingVoiceButtonVisibility(show: Boolean) {
-        DebugLog.add(TAG, "setFloatingVoiceButtonVisibility called with: $show")
+        DebugLog.add(TAG, "setFloatingVoiceButtonVisibility: Setting FAB visibility to $show.")
 
         if (show) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-                DebugLog.add(TAG, "SYSTEM_ALERT_WINDOW permission not granted. Requesting.")
+                DebugLog.add(TAG, "setFloatingVoiceButtonVisibility: SYSTEM_ALERT_WINDOW permission NOT granted. Requesting permission.")
                 Toast.makeText(this, "DroidRun Portal needs 'Draw over other apps' permission for the floating button. Please grant it.", Toast.LENGTH_LONG).show()
                 val intent = Intent(
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     Uri.parse("package:$packageName")
                 )
-                // We're not using startActivityForResult here as managing the result
-                // to automatically toggle the switch can be complex and might require onActivityResult handling.
-                // The user will grant permission and can then re-toggle the switch if needed,
-                // or the service will pick up the state on its next check/restart.
-                // For simplicity, we'll just save the desired state and send the broadcast.
-                // The service's showFloatingVoiceButton() also has a Settings.canDrawOverlays() check.
                 startActivity(intent)
-
-                // Even if permission is not granted yet, save the desired state.
-                // The service will only show the button if permission is active.
+                // Save desired state even if permission is not granted yet.
+                // Service will re-check permission.
                 val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                prefs.edit().putBoolean(KEY_FLOATING_BUTTON_VISIBLE, true).apply() // Save desired 'true' state
-
-                // Send broadcast to service anyway. Service will do its own canDrawOverlays check.
+                prefs.edit().putBoolean(KEY_FLOATING_BUTTON_VISIBLE, true).apply()
+                DebugLog.add(TAG, "setFloatingVoiceButtonVisibility: Saved desired FAB visible: true to Prefs. Permission activity launched.")
+                // Broadcast to service; service will handle permission check internally
                 val broadcastIntent = Intent(DroidrunPortalService.ACTION_TOGGLE_FLOATING_VOICE_BUTTON)
                 broadcastIntent.setPackage(packageName)
                 broadcastIntent.putExtra("show_button", true)
                 sendBroadcast(broadcastIntent)
-                DebugLog.add(TAG, "Saved FAB visible: true to Prefs and broadcasted. Permission activity launched.")
+                DebugLog.add(TAG, "setFloatingVoiceButtonVisibility: Broadcasted show_button=true to service (permission pending).")
                 return // Return after launching settings
+            } else {
+                 DebugLog.add(TAG, "setFloatingVoiceButtonVisibility: SYSTEM_ALERT_WINDOW permission IS granted or not required (SDK < M).")
             }
-            // If permission is already granted or not needed (older Android version)
         }
 
-        // Proceed to save preference and send broadcast
+        // Proceed to save preference and send broadcast if permission granted or not trying to show
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putBoolean(KEY_FLOATING_BUTTON_VISIBLE, show).apply()
 
@@ -341,6 +376,6 @@ class MainActivity : AppCompatActivity() {
         broadcastIntent.setPackage(packageName)
         broadcastIntent.putExtra("show_button", show)
         sendBroadcast(broadcastIntent)
-        DebugLog.add(TAG, "Floating button visibility set to $show, saved to Prefs and broadcasted to service.")
+        DebugLog.add(TAG, "setFloatingVoiceButtonVisibility: Floating button visibility set to $show, saved to Prefs and broadcasted to service.")
     }
 }

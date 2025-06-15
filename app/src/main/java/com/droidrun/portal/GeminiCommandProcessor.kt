@@ -7,10 +7,19 @@ import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
+import java.net.SocketTimeoutException
 import java.net.URL
+import java.net.UnknownHostException
+import kotlinx.coroutines.delay
+
+// Custom Exception classes
+class GeminiApiException(message: String, val originalException: Throwable? = null, val responseCode: Int? = null) : Exception(message)
+class GeminiResponseParseException(message: String, val problematicResponse: String? = null, val originalException: Throwable? = null) : Exception(message)
 
 class GeminiCommandProcessor(private val context: Context) {
     private val TAG = "GeminiCmdProc"
+    private val MAX_RETRIES = 3
+    private val INITIAL_BACKOFF_MS = 1000L
     private val API_KEY = "AIzaSyDiThnIxTCQf0WV_DodhHbNpAHevqoWUZU"
     private val API_URL_BASE = "https://generativelanguage.googleapis.com/v1beta/models/"
     private val MODEL_FLASH = "gemini-2.0-flash"
@@ -107,11 +116,26 @@ class GeminiCommandProcessor(private val context: Context) {
                 withContext(Dispatchers.Main) {
                     callback.onActionsReady(actions, originalCommand, currentElements)
                 }
-            } catch (e: Exception) {
-                DebugLog.add(TAG, "Error in makeGeminiRequest: ${e.message}")
-                Log.e(TAG, "Error in makeGeminiRequest, full stack trace:", e)
+            } catch (e: GeminiApiException) {
+                val errorMsg = "Gemini API call failed after retries: ${e.message}"
+                DebugLog.add(TAG, "$errorMsg. OriginalCommand: '$originalCommand', PromptType: $type, UIContextHash: ${currentElements.hashCode()}")
+                Log.e(TAG, errorMsg, e.originalException ?: e)
                 withContext(Dispatchers.Main) {
-                    callback.onError(e.message ?: "Unknown error in makeGeminiRequest")
+                    callback.onError("Failed to get a response from the assistant after multiple attempts. Please check your connection or try again later. (Details: ${e.message})")
+                }
+            } catch (e: GeminiResponseParseException) {
+                val errorMsg = "Failed to parse Gemini response: ${e.message}"
+                DebugLog.add(TAG, "$errorMsg. OriginalCommand: '$originalCommand', PromptType: $type, UIContextHash: ${currentElements.hashCode()}, ProblematicResponse: '${e.problematicResponse?.take(100)}...'")
+                Log.e(TAG, errorMsg, e.originalException ?: e)
+                withContext(Dispatchers.Main) {
+                    callback.onError("The assistant's response was not understood. Please try again. (Details: ${e.message})")
+                }
+            } catch (e: Exception) { // Catch-all for other unexpected errors
+                val errorMsg = "Unexpected error in makeGeminiRequest: ${e.message}"
+                DebugLog.add(TAG, "$errorMsg. OriginalCommand: '$originalCommand', PromptType: $type, UIContextHash: ${currentElements.hashCode()}")
+                Log.e(TAG, errorMsg, e)
+                withContext(Dispatchers.Main) {
+                    callback.onError("An unexpected error occurred: ${e.message}")
                 }
             }
         }
@@ -119,43 +143,78 @@ class GeminiCommandProcessor(private val context: Context) {
     
     private suspend fun callGeminiAPI(prompt: String, apiUrl: String): String {
         DebugLog.add(TAG, "callGeminiAPI with URL: $apiUrl")
-        return withContext(Dispatchers.IO) {
-            val url = URL("$apiUrl?key=$API_KEY")
-            val connection = url.openConnection() as HttpURLConnection
-            
-            connection.requestMethod = "POST"
-            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-            connection.doOutput = true
-            
-            val requestBodyJson = JSONObject().apply {
-                put("contents", JSONArray().apply {
-                    put(JSONObject().apply {
-                        put("parts", JSONArray().apply {
+        var currentDelay = INITIAL_BACKOFF_MS
+        for (attempt in 1..MAX_RETRIES) {
+            try {
+                return withContext(Dispatchers.IO) {
+                    val url = URL("$apiUrl?key=$API_KEY")
+                    val connection = url.openConnection() as HttpURLConnection
+                    connection.connectTimeout = 10000 // 10 seconds
+                    connection.readTimeout = 10000    // 10 seconds
+
+                    connection.requestMethod = "POST"
+                    connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    connection.doOutput = true
+
+                    val requestBodyJson = JSONObject().apply {
+                        put("contents", JSONArray().apply {
                             put(JSONObject().apply {
-                                put("text", prompt)
+                                put("parts", JSONArray().apply {
+                                    put(JSONObject().apply {
+                                        put("text", prompt)
+                                    })
+                                })
                             })
                         })
-                    })
-                })
+                    }
+                    val requestBodyString = requestBodyJson.toString()
+                    DebugLog.add(TAG, "Gemini request body (attempt $attempt): $requestBodyString")
+
+                    connection.outputStream.use { os ->
+                        os.write(requestBodyString.toByteArray(Charsets.UTF_8))
+                    }
+
+                    val responseCode = connection.responseCode
+                    if (responseCode == HttpURLConnection.HTTP_OK) {
+                        val responseBody = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                        DebugLog.add(TAG, "Gemini raw response (attempt $attempt): $responseBody")
+                        return@withContext responseBody
+                    } else {
+                        val errorContent = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: "No error content"
+                        DebugLog.add(TAG, "Gemini API call failed on attempt $attempt with code: $responseCode, error: $errorContent")
+                        if (attempt == MAX_RETRIES) {
+                            throw GeminiApiException("API call failed after $MAX_RETRIES attempts with code: $responseCode. Last error: $errorContent", responseCode = responseCode)
+                        }
+                        // Continue to retry logic below
+                    }
+                }
+            } catch (e: UnknownHostException) {
+                DebugLog.add(TAG, "Gemini API call attempt $attempt failed: UnknownHostException - ${e.message}")
+                if (attempt == MAX_RETRIES) {
+                    throw GeminiApiException("API call failed after $MAX_RETRIES attempts due to UnknownHostException: ${e.message}", originalException = e)
+                }
+            } catch (e: SocketTimeoutException) {
+                DebugLog.add(TAG, "Gemini API call attempt $attempt failed: SocketTimeoutException - ${e.message}")
+                if (attempt == MAX_RETRIES) {
+                    throw GeminiApiException("API call failed after $MAX_RETRIES attempts due to SocketTimeoutException: ${e.message}", originalException = e)
+                }
+            } catch (e: GeminiApiException) { // Catch already wrapped GeminiApiException to rethrow if it's the last attempt
+                 if (attempt == MAX_RETRIES) throw e
+                 // else it was a non-network http error, retry logic will apply
+            } catch (e: Exception) { // Catch any other unexpected exceptions during the API call
+                DebugLog.add(TAG, "Gemini API call attempt $attempt failed with unexpected exception: ${e.message}")
+                Log.e(TAG, "Unexpected exception in callGeminiAPI attempt $attempt", e)
+                if (attempt == MAX_RETRIES) {
+                    throw GeminiApiException("API call failed after $MAX_RETRIES attempts due to an unexpected error: ${e.message}", originalException = e)
+                }
             }
-            val requestBodyString = requestBodyJson.toString()
-            DebugLog.add(TAG, "Gemini request body: $requestBodyString")
-            
-            connection.outputStream.use { os ->
-                os.write(requestBodyString.toByteArray(Charsets.UTF_8))
-            }
-            
-            val responseCode = connection.responseCode
-            if (responseCode == HttpURLConnection.HTTP_OK) {
-                val responseBody = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                DebugLog.add(TAG, "Gemini raw response: $responseBody")
-                responseBody
-            } else {
-                val errorContent = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: "No error content"
-                DebugLog.add(TAG, "Gemini API call failed with code: $responseCode, error: $errorContent")
-                throw Exception("API call failed with code: $responseCode. Error: $errorContent")
-            }
+
+            DebugLog.add(TAG, "Retrying Gemini API call. Waiting for $currentDelay ms.")
+            delay(currentDelay)
+            currentDelay *= 2 // Exponential backoff
         }
+        // Should not be reached if MAX_RETRIES > 0, but as a fallback:
+        throw GeminiApiException("API call failed after $MAX_RETRIES attempts. Unknown error.")
     }
     
     private fun parseResponse(response: String): List<UIAction> {
@@ -167,29 +226,39 @@ class GeminiCommandProcessor(private val context: Context) {
                 val jsonResponse = JSONObject(jsonTextToParse)
                 val candidates = jsonResponse.optJSONArray("candidates")
                 if (candidates == null || candidates.length() == 0) {
-                    DebugLog.add(TAG, "Warning: Gemini response had no candidates or candidates array was null.")
                     val error = jsonResponse.optJSONObject("error")
                     if (error != null) {
                         val errorMessage = error.optString("message", "Unknown error in Gemini response structure")
                         DebugLog.add(TAG, "Gemini response indicates an error: $errorMessage")
-                        throw Exception("Gemini API error: $errorMessage")
+                        throw GeminiResponseParseException("Gemini API error: $errorMessage", problematicResponse = response)
                     }
-                    return emptyList()
+                    DebugLog.add(TAG, "Gemini response had no candidates or candidates array was null.")
+                    throw GeminiResponseParseException("Gemini response had no candidates.", problematicResponse = response)
                 }
-                val content = candidates.getJSONObject(0).optJSONObject("content")
+                val firstCandidate = candidates.optJSONObject(0)
+                if (firstCandidate == null) {
+                     DebugLog.add(TAG, "First candidate in Gemini response was null.")
+                    throw GeminiResponseParseException("First candidate in Gemini response was null.", problematicResponse = response)
+                }
+                val content = firstCandidate.optJSONObject("content")
                 if (content == null) {
-                     DebugLog.add(TAG, "Warning: Gemini response had no content object in candidate.")
-                     return emptyList()
+                     DebugLog.add(TAG, "Gemini response had no content object in candidate.")
+                     throw GeminiResponseParseException("Gemini response had no content object in candidate.", problematicResponse = response)
                 }
                 val parts = content.optJSONArray("parts")
                 if (parts == null || parts.length() == 0) {
-                    DebugLog.add(TAG, "Warning: Gemini response had no parts in content.")
-                    return emptyList()
+                    DebugLog.add(TAG, "Gemini response had no parts in content.")
+                    throw GeminiResponseParseException("Gemini response had no parts in content.", problematicResponse = response)
                 }
-                jsonTextToParse = parts.getJSONObject(0).optString("text", "").trim()
+                val firstPart = parts.optJSONObject(0)
+                if (firstPart == null) {
+                    DebugLog.add(TAG, "First part in Gemini response content was null.")
+                    throw GeminiResponseParseException("First part in Gemini response content was null.", problematicResponse = response)
+                }
+                jsonTextToParse = firstPart.optString("text", "").trim()
                 if (jsonTextToParse.isEmpty()) {
-                    DebugLog.add(TAG, "Warning: Extracted text from Gemini response was empty.")
-                    return emptyList()
+                    DebugLog.add(TAG, "Extracted text from Gemini response was empty.")
+                    throw GeminiResponseParseException("Extracted text from Gemini response was empty.", problematicResponse = response)
                 }
                 DebugLog.add(TAG, "Extracted text from verbose Gemini response: $jsonTextToParse")
             }
@@ -199,29 +268,31 @@ class GeminiCommandProcessor(private val context: Context) {
                 val actionsArray = JSONArray(jsonTextToParse)
                 for (i in 0 until actionsArray.length()) {
                     val actionObj = actionsArray.getJSONObject(i)
-                    actions.add(parseActionObject(actionObj))
+                    actions.add(parseActionObject(actionObj, jsonTextToParse))
                 }
             } else if (jsonTextToParse.startsWith("{")) {
                 val actionObj = JSONObject(jsonTextToParse)
-                actions.add(parseActionObject(actionObj))
+                actions.add(parseActionObject(actionObj, jsonTextToParse))
             } else {
                 DebugLog.add(TAG, "Response is not a valid JSON array or object after extraction: '$jsonTextToParse'")
-                throw Exception("Final text to parse is not a valid JSON array or object.")
+                throw GeminiResponseParseException("Final text to parse is not a valid JSON array or object.", problematicResponse = jsonTextToParse)
             }
 
             DebugLog.add(TAG, "Parsed UIAction list: ${actions.joinToString { it.toString() }}")
             return actions
-        } catch (e: Exception) {
+        } catch (e: GeminiResponseParseException) { // Re-throw custom parse exceptions
+            throw e
+        } catch (e: Exception) { // Wrap other JSON parsing exceptions
             DebugLog.add(TAG, "Error parsing Gemini response JSON: ${e.message}. Response was (first 200 chars): ${response.take(200)}")
             Log.e(TAG, "Error parsing full response JSON", e)
-            throw e
+            throw GeminiResponseParseException("Failed to parse JSON response: ${e.message}", problematicResponse = response, originalException = e)
         }
     }
 
-    private fun parseActionObject(actionObj: JSONObject): UIAction {
-        val type = actionObj.getString("type")
+    private fun parseActionObject(actionObj: JSONObject, originalJsonText: String): UIAction {
+        val type = actionObj.optString("type")
         if (type.isBlank()) {
-            throw Exception("Action type is blank in JSON object: $actionObj")
+            throw GeminiResponseParseException("Action type is blank in JSON object", problematicResponse = originalJsonText)
         }
         return UIAction(
             type = type,

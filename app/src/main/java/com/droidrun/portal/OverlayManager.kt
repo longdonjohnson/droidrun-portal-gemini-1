@@ -8,7 +8,8 @@ import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+// import android.util.Log // Replaced with DebugLog
+import com.droidrun.portal.DebugLog // Added DebugLog
 import android.view.Gravity
 import android.view.WindowManager
 import android.widget.FrameLayout
@@ -79,43 +80,54 @@ class OverlayManager(private val context: Context) {
     }
 
     fun setOnReadyCallback(callback: () -> Unit) {
+        DebugLog.add(TAG, "setOnReadyCallback: Callback being set. Overlay ready state: ${isOverlayReady.get()}")
         onReadyCallback = callback
-        // If already ready, call immediately
         if (isOverlayReady.get()) {
+            DebugLog.add(TAG, "setOnReadyCallback: Overlay already ready, invoking callback immediately.")
             handler.post(callback)
         }
     }
 
     fun showOverlay() {
+        DebugLog.add(TAG, "showOverlay: Called. Current overlayView is ${if (overlayView == null) "null" else "not null"}.")
         if (overlayView != null) {
-            Log.d(TAG, "Overlay already exists, checking if it's attached")
+            DebugLog.add(TAG, "showOverlay: OverlayView already exists. Checking attachment state.")
             try {
-                // Check if the view is actually attached
-                overlayView?.parent ?: run {
-                    Log.w(TAG, "Overlay exists but not attached, recreating")
+                if (overlayView?.parent == null) {
+                    DebugLog.add(TAG, "showOverlay: OverlayView exists but not attached to window. Recreating.")
+                    // Attempt to remove if it's in a weird state, though unlikely if parent is null
+                    try { windowManager.removeView(overlayView) } catch (e: Exception) { /* ignore */ }
                     overlayView = null
                     createAndAddOverlay()
-                    return
+                } else {
+                    DebugLog.add(TAG, "showOverlay: OverlayView already exists and is attached. Ensuring visibility and readiness.")
+                    overlayView?.visibility = View.VISIBLE // Ensure it's visible
+                    if (!isOverlayReady.getAndSet(true)) { // Set to true and check previous state
+                         onReadyCallback?.let {
+                            DebugLog.add(TAG, "showOverlay: Overlay was not marked ready. Invoking onReadyCallback.")
+                            handler.post(it)
+                        }
+                    } else {
+                        DebugLog.add(TAG, "showOverlay: Overlay already marked ready.")
+                    }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error checking overlay state: ${e.message}", e)
-                overlayView = null
+                DebugLog.add(TAG, "showOverlay: Error checking existing overlay state: ${e.message}. Recreating.")
+                Log.e(TAG, "showOverlay: Error checking overlay state", e) // Keep Log.e for stack trace
+                overlayView = null // Force recreation
                 createAndAddOverlay()
-                return
             }
-            isOverlayReady.set(true)
-            onReadyCallback?.let { handler.post(it) }
             return
         }
+        // overlayView is null, proceed to create
         createAndAddOverlay()
     }
 
     private fun createAndAddOverlay() {
+        DebugLog.add(TAG, "createAndAddOverlay: Attempting to create and add new OverlayView.")
         try {
-            Log.d(TAG, "Creating new overlay")
             overlayView = OverlayView(context).apply {
-                // Set hardware acceleration
-                setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                setLayerType(View.LAYER_TYPE_HARDWARE, null) // Hardware acceleration
             }
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
