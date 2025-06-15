@@ -111,7 +111,7 @@ class OverlayManager(private val context: Context) {
                     }
                 }
             } catch (e: Exception) {
-                DebugLog.add(TAG, "showOverlay: Error checking existing overlay state: ${e.message}. Recreating.", e)
+                DebugLog.add(TAG, "showOverlay: Error checking existing overlay state: ${e.message}. Recreating. Exception: ${e.toString()}")
                 overlayView = null
                 createAndAddOverlay()
             }
@@ -151,20 +151,20 @@ class OverlayManager(private val context: Context) {
                             DebugLog.add(TAG, "createAndAddOverlay: Delayed check: Overlay ready and callback invoked (if set).")
                             onReadyCallback?.let { it() }
                         } else {
-                            DebugLog.add(TAG, "createAndAddOverlay: Delayed check: Overlay not properly attached after delay. Attempting recovery.", e = Exception("Overlay not attached"))
+                            DebugLog.add(TAG, "createAndAddOverlay: Delayed check: Overlay not properly attached after delay. Attempting recovery. Exception: Overlay not attached")
                             hideOverlay()
                             showOverlay()
                         }
                     }, 500)
                 } catch (e: Exception) {
-                    DebugLog.add(TAG, "createAndAddOverlay: Error adding OverlayView to WindowManager: ${e.message}", e)
+                    DebugLog.add(TAG, "createAndAddOverlay: Error adding OverlayView to WindowManager: ${e.message}. Exception: ${e.toString()}")
                     overlayView = null
                     isOverlayVisible = false
                     isOverlayReady.set(false)
                 }
             }
         } catch (e: Exception) {
-            DebugLog.add(TAG, "createAndAddOverlay: Error creating OverlayView instance: ${e.message}", e)
+            DebugLog.add(TAG, "createAndAddOverlay: Error creating OverlayView instance: ${e.message}. Exception: ${e.toString()}")
             overlayView = null
             isOverlayVisible = false
             isOverlayReady.set(false)
@@ -184,7 +184,7 @@ class OverlayManager(private val context: Context) {
                 isOverlayReady.set(false)
                 DebugLog.add(TAG, "hideOverlay: Overlay state set to not visible and not ready.")
             } catch (e: Exception) {
-                DebugLog.add(TAG, "hideOverlay: Error removing OverlayView: ${e.message}", e)
+                DebugLog.add(TAG, "hideOverlay: Error removing OverlayView: ${e.message}. Exception: ${e.toString()}")
             }
         }
     }
@@ -388,7 +388,7 @@ class OverlayManager(private val context: Context) {
                 // val drawTime = System.currentTimeMillis() - startTime
                 // DebugLog.add(TAG, "OverlayView.onDraw: Draw completed in $drawTime ms for ${sortedElements.size} elements.") // Can be noisy
             } catch (e: Exception) {
-                DebugLog.add(TAG, "OverlayView.onDraw: Error during drawing: ${e.message}", e)
+                DebugLog.add(TAG, "OverlayView.onDraw: Error during drawing: ${e.message}. Exception: ${e.toString()}")
             }
         }
 
@@ -449,7 +449,7 @@ class OverlayManager(private val context: Context) {
                     textPaint
                 )
             } catch (e: Exception) {
-                DebugLog.add(TAG, "OverlayView.drawElement: Error drawing element ${elementInfo.index} (Text: '${elementInfo.text}'): ${e.message}", e)
+                DebugLog.add(TAG, "OverlayView.drawElement: Error drawing element ${elementInfo.index} (Text: '${elementInfo.text}'): ${e.message}. Exception: ${e.toString()}")
             }
         }
 
@@ -462,7 +462,7 @@ class OverlayManager(private val context: Context) {
                 canvas.drawRect(testRect, boxPaint)
                 DebugLog.add(TAG, "OverlayView.drawDebugRect: Drew test rectangle at $testRect")
             } catch (e: Exception) {
-                DebugLog.add(TAG, "OverlayView.drawDebugRect: Error: ${e.message}", e)
+                DebugLog.add(TAG, "OverlayView.drawDebugRect: Error: ${e.message}. Exception: ${e.toString()}")
             }
         }
         private fun isDebugging(): Boolean {
