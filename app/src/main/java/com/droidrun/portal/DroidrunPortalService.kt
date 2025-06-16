@@ -1017,23 +1017,63 @@ class DroidrunPortalService : AccessibilityService() {
         }
 
         floatingVoiceButton?.setOnTouchListener(object : View.OnTouchListener {
-            private var initialX: Int = 0; private var initialY: Int = 0
-            private var initialTouchX: Float = 0f; private var initialTouchY: Float = 0f
+            private var initialX: Int = 0
+            private var initialY: Int = 0
+            private var initialTouchX: Float = 0f
+            private var initialTouchY: Float = 0f
+            private var isDragging: Boolean = false // Flag to track drag state
+
+            // Define a threshold for movement to be considered a drag
+            private val DRAG_THRESHOLD = 10 // In pixels, adjust as needed
+
             override fun onTouch(v: View, event: MotionEvent): Boolean {
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
-                        initialX = params.x; initialY = params.y
-                        initialTouchX = event.rawX; initialTouchY = event.rawY
-                        return true
+                        initialX = params.x
+                        initialY = params.y
+                        initialTouchX = event.rawX
+                        initialTouchY = event.rawY
+                        isDragging = false // Reset drag state
+                        DebugLog.add(TAG, "FloatingButton: ACTION_DOWN")
+                        return true // Consume ACTION_DOWN to receive further events
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        params.x = initialX + (event.rawX - initialTouchX).toInt()
-                        params.y = initialY + (event.rawY - initialTouchY).toInt()
-                        if (floatingVoiceButton != null) windowManagerService.updateViewLayout(floatingVoiceButton, params)
-                        return true
+                        val deltaX = event.rawX - initialTouchX
+                        val deltaY = event.rawY - initialTouchY
+                        if (isDragging || Math.abs(deltaX) > DRAG_THRESHOLD || Math.abs(deltaY) > DRAG_THRESHOLD) {
+                            isDragging = true
+                            params.x = initialX + deltaX.toInt()
+                            params.y = initialY + deltaY.toInt()
+                            if (floatingVoiceButton != null) { // Check if button is still there
+                                try {
+                                    windowManagerService.updateViewLayout(floatingVoiceButton, params)
+                                } catch (e: Exception) {
+                                    DebugLog.add(TAG, "FloatingButton: ACTION_MOVE - Error updating layout: ${e.toString()}")
+                                }
+                            }
+                            // DebugLog.add(TAG, "FloatingButton: ACTION_MOVE - Dragging") // Can be too noisy
+                        }
+                        return true // Consume ACTION_MOVE if dragging or potentially starting a drag
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        DebugLog.add(TAG, "FloatingButton: ACTION_UP - isDragging: $isDragging")
+                        if (isDragging) {
+                            // Optional: Perform any action on drag end if needed
+                            isDragging = false
+                            return true // Consumed the drag, so click listener shouldn't fire
+                        }
+                        // If not dragging, it's a tap. Return false to let onClickListener handle it.
+                        // The view's performClick() will be called by the system if OnTouchListener returns false for ACTION_UP
+                        // and an OnClickListener is set.
+                        return false
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
+                        DebugLog.add(TAG, "FloatingButton: ACTION_CANCEL")
+                        isDragging = false
+                        return true // Typically consume cancel
                     }
                 }
-                return false
+                return false // Default to not consuming if not handled above
             }
         })
         try {
