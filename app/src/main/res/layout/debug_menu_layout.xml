@@ -128,13 +128,7 @@
                 android:layout_marginTop="8dp"
                 android:max="512" />
 
-            <!-- Floating Button Toggle Switch to be added here -->
-            <com.google.android.material.switchmaterial.SwitchMaterial
-                android:id="@+id/debug_menu_floating_button_toggle"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Show Floating Voice Button"
-                android:layout_marginTop="16dp" />
+            <!-- Floating Button Toggle Switch removed -->
 
             <LinearLayout
                 android:layout_width="match_parent"

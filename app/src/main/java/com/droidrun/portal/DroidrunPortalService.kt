@@ -36,7 +36,7 @@ class DroidrunPortalService : AccessibilityService() {
 
     companion object {
         private const val TAG = "DroidRunPortalSvc"
-        const val ACTION_TOGGLE_FLOATING_VOICE_BUTTON = "com.droidrun.portal.TOGGLE_FLOATING_VOICE_BUTTON"
+        // const val ACTION_TOGGLE_FLOATING_VOICE_BUTTON = "com.droidrun.portal.TOGGLE_FLOATING_VOICE_BUTTON" // Removed
         const val ACTION_GET_ELEMENTS = "com.droidrun.portal.GET_ELEMENTS"
         const val ACTION_ELEMENTS_RESPONSE = "com.droidrun.portal.ELEMENTS_RESPONSE"
         const val ACTION_TOGGLE_OVERLAY = "com.droidrun.portal.TOGGLE_OVERLAY" // Used by MainActivity
@@ -74,9 +74,10 @@ class DroidrunPortalService : AccessibilityService() {
     private val MAX_REPROMPT_ATTEMPTS = 5
     private var currentRepromptAttempts = 0
 
-    private var floatingVoiceButton: View? = null
-    private lateinit var windowManagerService: WindowManager
-    private var isFloatingButtonActuallyShown: Boolean = false
+    // Removed:
+    // private var floatingVoiceButton: View? = null
+    // private lateinit var windowManagerService: WindowManager // Removed as it was only for FAB
+    // private var isFloatingButtonActuallyShown: Boolean = false
 
     private val processActiveWindowRunnable = Runnable { processActiveWindow() }
     private var pendingVisualizationUpdate: Boolean = false
@@ -95,7 +96,7 @@ class DroidrunPortalService : AccessibilityService() {
         super.onCreate()
         DebugLog.add(TAG, "onCreate: Service initializing...")
         try {
-            windowManagerService = getSystemService(WINDOW_SERVICE) as WindowManager
+            // windowManagerService = getSystemService(WINDOW_SERVICE) as WindowManager // Removed
             geminiProcessor = GeminiCommandProcessor(this)
             overlayManager = OverlayManager(this)
 
@@ -144,10 +145,11 @@ class DroidrunPortalService : AccessibilityService() {
                                 processVoiceCommand(command)
                             }
                         }
-                        ACTION_TOGGLE_FLOATING_VOICE_BUTTON -> {
-                            val show = intent.getBooleanExtra("show_button", false)
-                            if (show) showFloatingVoiceButton() else hideFloatingVoiceButton()
-                        }
+                        // Removed case for ACTION_TOGGLE_FLOATING_VOICE_BUTTON
+                        // ACTION_TOGGLE_FLOATING_VOICE_BUTTON -> {
+                        //     val show = intent.getBooleanExtra("show_button", false)
+                        //     if (show) showFloatingVoiceButton() else hideFloatingVoiceButton()
+                        // }
                         MainActivity.ACTION_UPDATE_OVERLAY_OFFSET -> {
                             val offsetValue = intent.getIntExtra(MainActivity.EXTRA_OVERLAY_OFFSET, MainActivity.DEFAULT_OFFSET)
                             DebugLog.add(TAG, "Received ACTION_UPDATE_OVERLAY_OFFSET, new offset: $offsetValue")
@@ -189,7 +191,7 @@ class DroidrunPortalService : AccessibilityService() {
             val filter = IntentFilter().apply {
                 addAction("com.droidrun.portal.PROCESS_NL_COMMAND")
                 addAction("com.droidrun.portal.PROCESS_VOICE_COMMAND")
-                addAction(ACTION_TOGGLE_FLOATING_VOICE_BUTTON)
+                // addAction(ACTION_TOGGLE_FLOATING_VOICE_BUTTON) // Removed
                 addAction(MainActivity.ACTION_UPDATE_OVERLAY_OFFSET)
                 addAction(MainActivity.ACTION_UPDATE_OVERLAY_OFFSET_X) // Added X-offset action
                 addAction(ACTION_TOGGLE_OVERLAY)
@@ -240,7 +242,7 @@ class DroidrunPortalService : AccessibilityService() {
             if (::commandReceiver.isInitialized) {
                 unregisterReceiver(commandReceiver)
             }
-            hideFloatingVoiceButton()
+            // hideFloatingVoiceButton() // Removed
             mainHandler.removeCallbacks(updateOverlayVisualizationRunnable)
             mainHandler.removeCallbacks(processActiveWindowRunnable)
             if (::overlayManager.isInitialized) {
@@ -512,20 +514,32 @@ class DroidrunPortalService : AccessibilityService() {
     }
 
     private fun clickElementByIndex(index: Int) {
-        // This function is called by handleActionClick, error handling is done there or can be added here too if needed.
-        val elements = getInteractiveElements() // Assumes getInteractiveElements handles rootInActiveWindow being null
-        if (index >= 0 && index < elements.size) {
-            val nodeToClick = elements[index]
-            DebugLog.add(TAG, "clickElementByIndex: Attempting to click element at index $index: ${nodeToClick.className} '${nodeToClick.text}'")
-            nodeToClick.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            DebugLog.add(TAG, "clickElementByIndex: Clicked element at index $index successfully.")
-        } else {
+        val elements = getInteractiveElements()
+        if (index < 0 || index >= elements.size) {
             DebugLog.add(TAG, "clickElementByIndex: Failed to click - Element index $index out of bounds (size: ${elements.size}).")
+            return
         }
+        val nodeToClick = elements[index]
+
+        if (!nodeToClick.isVisibleToUser) {
+            DebugLog.add(TAG, "clickElementByIndex: Warning - Element at index $index (ID: ${nodeToClick.viewIdResourceName ?: "N/A"}, Text: '${nodeToClick.text}') is no longer visible.")
+            // Decide if to proceed or return. For now, proceeding as per subtask note.
+        }
+        if (!nodeToClick.isEnabled) {
+            DebugLog.add(TAG, "clickElementByIndex: Warning - Element at index $index (ID: ${nodeToClick.viewIdResourceName ?: "N/A"}, Text: '${nodeToClick.text}') is disabled.")
+            // Decide if to proceed or return.
+        }
+        if (!nodeToClick.isClickable) { // Redundant check if getInteractiveElements is perfect, but good for safety.
+            DebugLog.add(TAG, "clickElementByIndex: Warning - Element at index $index (ID: ${nodeToClick.viewIdResourceName ?: "N/A"}, Text: '${nodeToClick.text}') is not marked clickable by its properties (isClickable=${nodeToClick.isClickable}).")
+        }
+
+        DebugLog.add(TAG, "clickElementByIndex: Attempting to click element at index $index: ${nodeToClick.className} '${nodeToClick.text}', ID: ${nodeToClick.viewIdResourceName ?: "N/A"}")
+        nodeToClick.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        DebugLog.add(TAG, "clickElementByIndex: Click action performed for element at index $index.")
     }
     
     private fun clickAtCoordinates(x: Int, y: Int) {
-        DebugLog.add(TAG, "clickAtCoordinates: Attempting click at ($x, $y)")
+        DebugLog.add(TAG, "clickAtCoordinates: Attempting click at ($x, $y). Screen bounds: $screenBounds")
         try {
             val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
             val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 100)).build()
@@ -551,17 +565,45 @@ class DroidrunPortalService : AccessibilityService() {
     }
 
     private fun typeInElement(index: Int, text: String) {
-        // Called by handleActionType, error handling there.
         val elements = getInteractiveElements()
-        if (index >= 0 && index < elements.size) {
-            val nodeToTypeIn = elements[index]
-            DebugLog.add(TAG, "typeInElement: Attempting to type '$text' in element at index $index: ${nodeToTypeIn.className}")
-            nodeToTypeIn.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-            val arguments = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
-            nodeToTypeIn.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+        if (index < 0 || index >= elements.size) {
+            DebugLog.add(TAG, "typeInElement: Failed to type - Element index $index out of bounds (size: ${elements.size}).")
+            return
+        }
+        val nodeToTypeIn = elements[index]
+
+        if (!nodeToTypeIn.isVisibleToUser) {
+            DebugLog.add(TAG, "typeInElement: Warning - Element at index $index (ID: ${nodeToTypeIn.viewIdResourceName ?: "N/A"}, Text: '${nodeToTypeIn.text}') is no longer visible. Cannot type.")
+            return // Do not proceed if not visible
+        }
+        if (!nodeToTypeIn.isEnabled) {
+            DebugLog.add(TAG, "typeInElement: Warning - Element at index $index (ID: ${nodeToTypeIn.viewIdResourceName ?: "N/A"}, Text: '${nodeToTypeIn.text}') is disabled. Cannot type.")
+            return // Do not proceed if disabled
+        }
+        if (!nodeToTypeIn.isEditable) {
+            DebugLog.add(TAG, "typeInElement: Error - Element at index $index (ID: ${nodeToTypeIn.viewIdResourceName ?: "N/A"}, Text: '${nodeToTypeIn.text}') is not editable. Skipping type action.")
+            return // Crucial: Do not proceed if not editable
+        }
+
+        DebugLog.add(TAG, "typeInElement: Attempting to type '$text' in element at index $index: ID: ${nodeToTypeIn.viewIdResourceName ?: "N/A"}, Class: ${nodeToTypeIn.className}")
+
+        // Focus the element first
+        if (nodeToTypeIn.isFocusable) {
+            if (!nodeToTypeIn.isFocused) {
+                 DebugLog.add(TAG, "typeInElement: Element not focused. Attempting to set focus.")
+                 nodeToTypeIn.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+                 // Re-fetch the node or check focus state again if necessary, though performAction is often synchronous enough
+            }
+        } else {
+             DebugLog.add(TAG, "typeInElement: Warning - Element is not focusable, typing might fail or go to wrong field.")
+        }
+
+        val arguments = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
+        val success = nodeToTypeIn.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+        if (success) {
             DebugLog.add(TAG, "typeInElement: Typed '$text' in element at index $index successfully.")
         } else {
-            DebugLog.add(TAG, "typeInElement: Failed to type - Element index $index out of bounds (size: ${elements.size}).")
+            DebugLog.add(TAG, "typeInElement: Failed to type '$text' in element at index $index. ACTION_SET_TEXT returned false.")
         }
     }
     
@@ -853,18 +895,27 @@ class DroidrunPortalService : AccessibilityService() {
             }
 
             val classNameStr = node.className?.toString() ?: "UnknownClass"
-            val textStr = node.text?.toString() ?: node.contentDescription?.toString() ?: ""
+            // Prioritize node.text for the 'text' field.
+            val mainText = node.text?.toString() ?: ""
+            val contentDescText = node.contentDescription?.toString()
+            val resourceId = node.viewIdResourceName?.toString()
+            val isPassword = node.isPassword
+            val hint = if (node.isEditable) node.hintText?.toString() else null
 
             elements.add(ElementNode(
                 nodeInfo = node, // Keep original node for actions
                 rect = rect,
-                text = textStr,
+                text = mainText, // Primary text from node.text
                 className = classNameStr,
                 windowLayer = depth, // Could be useful for overlay drawing order
                 creationTime = System.currentTimeMillis(),
-                id = ElementNode.createId(rect, classNameStr, textStr)
+                id = ElementNode.createId(rect, classNameStr, mainText), // ID based on mainText
+                contentDescription = contentDescText,
+                resourceIdName = resourceId,
+                hintText = hint,
+                isPasswordInput = isPassword
             ))
-            // DebugLog.add(TAG, "recursivelyExtractElements: Added element ${classNameStr} with text '${textStr}' at depth $depth")
+            // DebugLog.add(TAG, "recursivelyExtractElements: Added element ${classNameStr} with text '${mainText}' at depth $depth")
 
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let { childNode ->
@@ -888,9 +939,13 @@ class DroidrunPortalService : AccessibilityService() {
         }
         elementsToProcess.forEachIndexed { index, element ->
             val jsonObject = JSONObject().apply {
-                put("index", index)
-                put("text", element.text)
+                put("index", index) // This is the list index for Gemini, not related to ElementNode.overlayIndex
+                put("text", element.text) // Already using element.text which is node.text
                 put("class", element.className)
+                put("contentDescription", element.contentDescription ?: JSONObject.NULL)
+                put("resourceId", element.resourceIdName ?: JSONObject.NULL)
+                put("hintText", element.hintText ?: JSONObject.NULL)
+                put("isPassword", element.isPasswordInput)
                 put("clickable", element.isClickable())
                 put("checkable", element.nodeInfo.isCheckable)
                 put("editable", element.nodeInfo.isEditable)
@@ -975,127 +1030,6 @@ class DroidrunPortalService : AccessibilityService() {
         return Color.rgb(red, 0, blue)
     }
     
-    private fun showFloatingVoiceButton() {
-        if (!Settings.canDrawOverlays(this)) {
-            DebugLog.add(TAG, "Cannot show floating button: SYSTEM_ALERT_WINDOW permission not granted.")
-            return
-        }
-        if (floatingVoiceButton != null) {
-            DebugLog.add(TAG, "Floating button already shown.")
-            return
-        }
-        DebugLog.add(TAG, "Attempting to show floating voice button.")
-        isFloatingButtonActuallyShown = true
-        val inflater = LayoutInflater.from(this)
-        floatingVoiceButton = inflater.inflate(R.layout.floating_voice_button_layout, null)
-
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT
-        )
-        params.gravity = Gravity.TOP or Gravity.START
-        params.x = 100
-        params.y = 300
-
-        floatingVoiceButton?.setOnClickListener {
-            DebugLog.add(TAG, "Floating voice button onClick: Listener triggered.")
-            val intent = Intent(this@DroidrunPortalService, VoiceCommandActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            DebugLog.add(TAG, "Floating voice button onClick: Intent created for VoiceCommandActivity. Flags: ${intent.flags}")
-            try {
-                DebugLog.add(TAG, "Floating voice button onClick: Attempting to start VoiceCommandActivity...")
-                startActivity(intent)
-                DebugLog.add(TAG, "Floating voice button onClick: startActivity(VoiceCommandActivity) called successfully.")
-            } catch (e: Exception) {
-                DebugLog.add(TAG, "Floating voice button onClick: EXCEPTION while trying to start VoiceCommandActivity: ${e.toString()}")
-                // Log.e(TAG, "Error starting VoiceCommandActivity from FAB", e) // Replaced by DebugLog with e.toString()
-            }
-        }
-
-        floatingVoiceButton?.setOnTouchListener(object : View.OnTouchListener {
-            private var initialX: Int = 0
-            private var initialY: Int = 0
-            private var initialTouchX: Float = 0f
-            private var initialTouchY: Float = 0f
-            private var isDragging: Boolean = false // Flag to track drag state
-
-            // Define a threshold for movement to be considered a drag
-            private val DRAG_THRESHOLD = 10 // In pixels, adjust as needed
-
-            override fun onTouch(v: View, event: MotionEvent): Boolean {
-                when (event.action) {
-                    MotionEvent.ACTION_DOWN -> {
-                        initialX = params.x
-                        initialY = params.y
-                        initialTouchX = event.rawX
-                        initialTouchY = event.rawY
-                        isDragging = false // Reset drag state
-                        DebugLog.add(TAG, "FloatingButton: ACTION_DOWN")
-                        return true // Consume ACTION_DOWN to receive further events
-                    }
-                    MotionEvent.ACTION_MOVE -> {
-                        val deltaX = event.rawX - initialTouchX
-                        val deltaY = event.rawY - initialTouchY
-                        if (isDragging || Math.abs(deltaX) > DRAG_THRESHOLD || Math.abs(deltaY) > DRAG_THRESHOLD) {
-                            isDragging = true
-                            params.x = initialX + deltaX.toInt()
-                            params.y = initialY + deltaY.toInt()
-                            if (floatingVoiceButton != null) { // Check if button is still there
-                                try {
-                                    windowManagerService.updateViewLayout(floatingVoiceButton, params)
-                                } catch (e: Exception) {
-                                    DebugLog.add(TAG, "FloatingButton: ACTION_MOVE - Error updating layout: ${e.toString()}")
-                                }
-                            }
-                            // DebugLog.add(TAG, "FloatingButton: ACTION_MOVE - Dragging") // Can be too noisy
-                        }
-                        return true // Consume ACTION_MOVE if dragging or potentially starting a drag
-                    }
-                    MotionEvent.ACTION_UP -> {
-                        DebugLog.add(TAG, "FloatingButton: ACTION_UP - isDragging: $isDragging")
-                        if (isDragging) {
-                            // Optional: Perform any action on drag end if needed
-                            isDragging = false
-                            return true // Consumed the drag, so click listener shouldn't fire
-                        }
-                        // If not dragging, it's a tap. Return false to let onClickListener handle it.
-                        // The view's performClick() will be called by the system if OnTouchListener returns false for ACTION_UP
-                        // and an OnClickListener is set.
-                        return false
-                    }
-                    MotionEvent.ACTION_CANCEL -> {
-                        DebugLog.add(TAG, "FloatingButton: ACTION_CANCEL")
-                        isDragging = false
-                        return true // Typically consume cancel
-                    }
-                }
-                return false // Default to not consuming if not handled above
-            }
-        })
-        try {
-             windowManagerService.addView(floatingVoiceButton, params)
-             DebugLog.add(TAG, "Floating voice button added to window.")
-        } catch (e: Exception) {
-             DebugLog.add(TAG, "Error adding floating voice button: ${e.toString()}") // Changed to e.toString()
-             isFloatingButtonActuallyShown = false; floatingVoiceButton = null;
-        }
-    }
-
-    private fun hideFloatingVoiceButton() {
-        if (floatingVoiceButton != null) {
-            DebugLog.add(TAG, "Attempting to hide floating voice button.")
-            try {
-                windowManagerService.removeView(floatingVoiceButton)
-                DebugLog.add(TAG, "Floating voice button removed from window.")
-            } catch (e: Exception) {
-                 DebugLog.add(TAG, "Error removing floating voice button: ${e.toString()}") // Changed to e.toString()
-            }
-            floatingVoiceButton = null
-        }
-        isFloatingButtonActuallyShown = false
-    }
+    // Removed showFloatingVoiceButton()
+    // Removed hideFloatingVoiceButton()
 }

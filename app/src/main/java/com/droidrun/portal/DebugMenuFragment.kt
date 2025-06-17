@@ -32,7 +32,7 @@ class DebugMenuFragment : DialogFragment() {
     private lateinit var debugOffsetInputLayout: TextInputLayout
     private lateinit var debugOffsetInput: TextInputEditText
     private lateinit var debugOffsetSlider: SeekBar
-    private lateinit var floatingButtonToggle: SwitchMaterial
+    // private lateinit var floatingButtonToggle: SwitchMaterial // Removed
 
     // X-Offset Controls
     private lateinit var debugOffsetXInputLayout: TextInputLayout
@@ -63,7 +63,7 @@ class DebugMenuFragment : DialogFragment() {
         debugOffsetInputLayout = view.findViewById(R.id.debug_menu_offset_input_layout)
         debugOffsetInput = view.findViewById(R.id.debug_menu_offset_input)
         debugOffsetSlider = view.findViewById(R.id.debug_menu_offset_slider)
-        floatingButtonToggle = view.findViewById(R.id.debug_menu_floating_button_toggle)
+        // floatingButtonToggle = view.findViewById(R.id.debug_menu_floating_button_toggle) // Removed
 
         // Initialize X-Offset views
         debugOffsetXInputLayout = view.findViewById(R.id.debug_menu_offset_x_input_layout)
@@ -192,11 +192,12 @@ class DebugMenuFragment : DialogFragment() {
                 }
             }
 
-            val prefs = activity.getSharedPreferences(MainActivity.PREFS_NAME, Context.MODE_PRIVATE)
-            floatingButtonToggle.isChecked = prefs.getBoolean(MainActivity.KEY_FLOATING_BUTTON_VISIBLE, false)
-            floatingButtonToggle.setOnCheckedChangeListener { _, isChecked ->
-                activity.setFloatingVoiceButtonVisibility(isChecked)
-            }
+            // Removed logic for floatingButtonToggle
+            // val prefs = activity.getSharedPreferences(MainActivity.PREFS_NAME, Context.MODE_PRIVATE)
+            // floatingButtonToggle.isChecked = prefs.getBoolean(MainActivity.KEY_FLOATING_BUTTON_VISIBLE, false)
+            // floatingButtonToggle.setOnCheckedChangeListener { _, isChecked ->
+            //     activity.setFloatingVoiceButtonVisibility(isChecked)
+            // }
         }
 
         refreshLogsButton.setOnClickListener { refreshLogView() }

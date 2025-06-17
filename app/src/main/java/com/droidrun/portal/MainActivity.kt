@@ -47,7 +47,7 @@ class MainActivity : AppCompatActivity() {
        internal const val PREFS_NAME = "DroidRunPrefs"
        internal const val KEY_OVERLAY_OFFSET = "overlay_offset"
        internal const val KEY_OVERLAY_VISIBLE = "overlay_visible"
-       internal const val KEY_FLOATING_BUTTON_VISIBLE = "floating_button_visible"
+       // internal const val KEY_FLOATING_BUTTON_VISIBLE = "floating_button_visible" // Removed
 
        internal const val DEFAULT_OFFSET = -128
        internal const val MIN_OFFSET = -256
@@ -147,9 +147,10 @@ class MainActivity : AppCompatActivity() {
         // Call the method that also broadcasts, to ensure service syncs
         toggleOverlayVisibilityExternally(isOverlayActuallyVisibleState) // Log inside this method
 
-        val shouldShowFabInitially = prefs.getBoolean(KEY_FLOATING_BUTTON_VISIBLE, false)
-        DebugLog.add(TAG, "onCreate: Initial FAB state from prefs: $shouldShowFabInitially.")
-        setFloatingVoiceButtonVisibility(shouldShowFabInitially) // Log inside this method
+        // Removed logic for KEY_FLOATING_BUTTON_VISIBLE and setFloatingVoiceButtonVisibility
+        // val shouldShowFabInitially = prefs.getBoolean(KEY_FLOATING_BUTTON_VISIBLE, false)
+        // DebugLog.add(TAG, "onCreate: Initial FAB state from prefs: $shouldShowFabInitially.")
+        // setFloatingVoiceButtonVisibility(shouldShowFabInitially) // Log inside this method
 
         val initialOffset = prefs.getInt(KEY_OVERLAY_OFFSET, DEFAULT_OFFSET)
         DebugLog.add(TAG, "onCreate: Initial Y-offset from prefs: $initialOffset.")
@@ -339,43 +340,5 @@ class MainActivity : AppCompatActivity() {
         DebugLog.add(TAG, "DebugMenu: Overlay visibility toggle broadcasted to service: $show")
     }
 
-    fun setFloatingVoiceButtonVisibility(show: Boolean) {
-        DebugLog.add(TAG, "setFloatingVoiceButtonVisibility: Setting FAB visibility to $show.")
-
-        if (show) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-                DebugLog.add(TAG, "setFloatingVoiceButtonVisibility: SYSTEM_ALERT_WINDOW permission NOT granted. Requesting permission.")
-                Toast.makeText(this, "DroidRun Portal needs 'Draw over other apps' permission for the floating button. Please grant it.", Toast.LENGTH_LONG).show()
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName")
-                )
-                startActivity(intent)
-                // Save desired state even if permission is not granted yet.
-                // Service will re-check permission.
-                val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                prefs.edit().putBoolean(KEY_FLOATING_BUTTON_VISIBLE, true).apply()
-                DebugLog.add(TAG, "setFloatingVoiceButtonVisibility: Saved desired FAB visible: true to Prefs. Permission activity launched.")
-                // Broadcast to service; service will handle permission check internally
-                val broadcastIntent = Intent(DroidrunPortalService.ACTION_TOGGLE_FLOATING_VOICE_BUTTON)
-                broadcastIntent.setPackage(packageName)
-                broadcastIntent.putExtra("show_button", true)
-                sendBroadcast(broadcastIntent)
-                DebugLog.add(TAG, "setFloatingVoiceButtonVisibility: Broadcasted show_button=true to service (permission pending).")
-                return // Return after launching settings
-            } else {
-                 DebugLog.add(TAG, "setFloatingVoiceButtonVisibility: SYSTEM_ALERT_WINDOW permission IS granted or not required (SDK < M).")
-            }
-        }
-
-        // Proceed to save preference and send broadcast if permission granted or not trying to show
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putBoolean(KEY_FLOATING_BUTTON_VISIBLE, show).apply()
-
-        val broadcastIntent = Intent(DroidrunPortalService.ACTION_TOGGLE_FLOATING_VOICE_BUTTON)
-        broadcastIntent.setPackage(packageName)
-        broadcastIntent.putExtra("show_button", show)
-        sendBroadcast(broadcastIntent)
-        DebugLog.add(TAG, "setFloatingVoiceButtonVisibility: Floating button visibility set to $show, saved to Prefs and broadcasted to service.")
-    }
+    // Removed setFloatingVoiceButtonVisibility(show: Boolean) method
 }
