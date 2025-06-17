@@ -16,6 +16,10 @@ data class ElementNode(
     val windowLayer: Int,
     var creationTime: Long,
     val id: String,
+    var contentDescription: String?, // New property
+    var resourceIdName: String?,     // New property
+    var hintText: String?,           // New property
+    var isPasswordInput: Boolean = false, // New property
     var parent: ElementNode? = null,
     val children: MutableList<ElementNode> = mutableListOf(),
     var clickableIndex: Int = -1,

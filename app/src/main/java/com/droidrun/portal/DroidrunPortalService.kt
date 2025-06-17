@@ -1,65 +1,60 @@
 package com.droidrun.portal
 
-import com.droidrun.portal.DebugLog // Added
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
-import android.graphics.Rect
-import android.os.Handler
-import android.os.Looper
-import android.os.Bundle
-import android.util.Log
-import android.view.accessibility.AccessibilityEvent
-import android.view.accessibility.AccessibilityNodeInfo
-import android.content.Context
-import android.content.Context.RECEIVER_NOT_EXPORTED
-import android.content.Context.RECEIVER_EXPORTED
-import android.graphics.Point
-import android.graphics.Path
-import android.view.WindowManager
-import android.view.accessibility.AccessibilityWindowInfo
-import java.util.concurrent.atomic.AtomicBoolean
-import android.graphics.Color
 import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.Color
+import android.graphics.PixelFormat
+import android.graphics.Point
+import android.graphics.Path
+import android.graphics.Rect
+import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
+import android.util.Log
+import android.view.Gravity
+import android.view.LayoutInflater
+import android.view.MotionEvent
+import android.view.View
+import android.view.WindowManager
+import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
+import com.droidrun.portal.DebugLog
+import com.droidrun.portal.GeminiCommandProcessor
+import java.util.LinkedList
+import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.LinkedList // Added
-import kotlin.math.abs
+// import com.droidrun.portal.UiUtils.findFirstScrollableNode // Assuming findFirstScrollableNode is made private in this file
 
 class DroidrunPortalService : AccessibilityService() {
-    
+
     companion object {
-        private const val TAG = "DROIDRUN_PORTAL"
-        private const val REFRESH_INTERVAL_MS = 250L // Single refresh interval for all updates
-        private const val MIN_ELEMENT_SIZE = 5 // Minimum size for an element to be considered
-        private const val MIN_FRAME_TIME_MS = 16L // Minimum time between frames (roughly 60 FPS)
-        
-        // Time-based fade settings
-        private const val FADE_DURATION_MS = 300000L // Time to fade from weight 1.0 to 0.0 (300 seconds = 5 minutes)
-        private const val VISUALIZATION_REFRESH_MS = 250L // How often to refresh visualization (250ms = 4 times per second)
-        private const val MIN_DISPLAY_WEIGHT = 0.05f // Minimum weight to display elements
-        private const val SAME_TIME_THRESHOLD_MS = 500L // Elements appearing within this time window are considered "same time"
-        
-        // Color for heatmap (we'll use a gradient from RED to BLUE based on weight)
-        private val NEW_ELEMENT_COLOR = Color.RED         // Newest elements
-        private val OLD_ELEMENT_COLOR = Color.BLUE        // Oldest elements
-        
-        // Intent actions for ADB communication
+        private const val TAG = "DroidRunPortalSvc"
+        // const val ACTION_TOGGLE_FLOATING_VOICE_BUTTON = "com.droidrun.portal.TOGGLE_FLOATING_VOICE_BUTTON" // Removed
         const val ACTION_GET_ELEMENTS = "com.droidrun.portal.GET_ELEMENTS"
         const val ACTION_ELEMENTS_RESPONSE = "com.droidrun.portal.ELEMENTS_RESPONSE"
-        const val ACTION_TOGGLE_OVERLAY = "com.droidrun.portal.TOGGLE_OVERLAY"
+        const val ACTION_TOGGLE_OVERLAY = "com.droidrun.portal.TOGGLE_OVERLAY" // Used by MainActivity
         const val ACTION_RETRIGGER_ELEMENTS = "com.droidrun.portal.RETRIGGER_ELEMENTS"
         const val ACTION_GET_ALL_ELEMENTS = "com.droidrun.portal.GET_ALL_ELEMENTS"
         const val ACTION_GET_INTERACTIVE_ELEMENTS = "com.droidrun.portal.GET_INTERACTIVE_ELEMENTS"
         const val ACTION_FORCE_HIDE_OVERLAY = "com.droidrun.portal.FORCE_HIDE_OVERLAY"
-        const val ACTION_UPDATE_OVERLAY_OFFSET = "com.droidrun.portal.UPDATE_OVERLAY_OFFSET"
-        const val EXTRA_OVERLAY_OFFSET = "overlay_offset"
+        // ACTION_UPDATE_OVERLAY_OFFSET is defined in MainActivity
+        // EXTRA_OVERLAY_OFFSET is defined in MainActivity
         const val EXTRA_ELEMENTS_DATA = "elements_data"
         const val EXTRA_ALL_ELEMENTS_DATA = "all_elements_data"
-        const val EXTRA_OVERLAY_VISIBLE = "overlay_visible"
+        const val EXTRA_OVERLAY_VISIBLE = "overlay_visible" // Used by MainActivity for broadcast, and service for SharedPreferences key
+
+        private const val REFRESH_INTERVAL_MS = 250L
+        private const val MIN_ELEMENT_SIZE = 5
+        private const val MIN_DISPLAY_WEIGHT = 0.05f // Used in updateVisualizationIfNeeded
     }
-    
+
     private lateinit var overlayManager: OverlayManager
     private lateinit var geminiProcessor: GeminiCommandProcessor
     private lateinit var commandReceiver: BroadcastReceiver
@@ -67,40 +62,80 @@ class DroidrunPortalService : AccessibilityService() {
     private var isInitialized = false
     private val screenBounds = Rect()
     private val visibleElements = mutableListOf<ElementNode>()
-    private val previousElements = mutableListOf<ElementNode>() // Track previous elements
-    private val isProcessing = AtomicBoolean(false)
-    private var currentPackageName: String = "" // Track current app package
-    private var overlayVisible = true // Track if overlay is visible
-    
-    // Variables for multi-step command processing
+    private val isProcessingAccessibilityEvent = AtomicBoolean(false)
+    private var currentPackageName: String = ""
+    private var isOverlayVisuallyEnabledState: Boolean = true
+
+    private lateinit var geminiActionCallback: GeminiCommandProcessor.CommandCallback
     private var currentOriginalCommand: String? = null
     private var isProcessingMultiStep: Boolean = false
     private var lastKnownUiContext: String? = null
-    private val pendingActionsQueue: java.util.LinkedList<GeminiCommandProcessor.UIAction> = java.util.LinkedList()
+    private val pendingActionsQueue: LinkedList<GeminiCommandProcessor.UIAction> = LinkedList()
     private val MAX_REPROMPT_ATTEMPTS = 5
     private var currentRepromptAttempts = 0
 
-    // Track currently displayed elements (after filtering)
-    private val displayedElements = mutableListOf<Pair<ElementNode, Float>>()
-    
-    private var lastDrawTime = 0L
-    private var pendingVisualizationUpdate = false
+    // Removed:
+    // private var floatingVoiceButton: View? = null
+    // private lateinit var windowManagerService: WindowManager // Removed as it was only for FAB
+    // private var isFloatingButtonActuallyShown: Boolean = false
+
+    private val processActiveWindowRunnable = Runnable { processActiveWindow() }
+    private var pendingVisualizationUpdate: Boolean = false
+    private val updateOverlayVisualizationRunnable: Runnable = object : Runnable {
+        override fun run() {
+            if (isInitialized) {
+                if (pendingVisualizationUpdate && isOverlayVisuallyEnabledState) {
+                    updateVisualizationIfNeeded()
+                }
+            }
+            mainHandler.postDelayed(this, REFRESH_INTERVAL_MS)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "Service onCreate")
+        DebugLog.add(TAG, "onCreate: Service initializing...")
         try {
-            // Initialize Gemini processor
+            // windowManagerService = getSystemService(WINDOW_SERVICE) as WindowManager // Removed
             geminiProcessor = GeminiCommandProcessor(this)
-            
-            // Register broadcast receiver for commands
+            overlayManager = OverlayManager(this)
+
+            geminiActionCallback = object : GeminiCommandProcessor.CommandCallback {
+                override fun onActionsReady(actions: List<GeminiCommandProcessor.UIAction>, forCommand: String, uiContextUsed: String) {
+                    handleGeminiActions(actions, forCommand, uiContextUsed)
+                }
+                override fun onError(error: String) {
+                    DebugLog.add(TAG, "Gemini onError callback triggered. Original cmd: '${currentOriginalCommand ?: "N/A"}'. Error: $error. Resetting all relevant states.")
+
+                    if (isProcessingMultiStep) {
+                        isProcessingMultiStep = false
+                        DebugLog.add(TAG, "StateChange: isProcessingMultiStep set to false (Gemini onError).")
+                    }
+                    if (currentOriginalCommand != null) {
+                        currentOriginalCommand = null
+                        DebugLog.add(TAG, "StateChange: currentOriginalCommand nulled (Gemini onError).")
+                    }
+                    val oldQueueSize = pendingActionsQueue.size
+                    if (oldQueueSize > 0) {
+                        pendingActionsQueue.clear()
+                        DebugLog.add(TAG, "StateChange: pendingActionsQueue cleared (Gemini onError). Old size: $oldQueueSize")
+                    }
+                    if (currentRepromptAttempts != 0) { // Only log if it was not already 0
+                        currentRepromptAttempts = 0
+                        DebugLog.add(TAG, "StateChange: currentRepromptAttempts reset to 0 (Gemini onError).")
+                    }
+                }
+            }
+
             commandReceiver = object : BroadcastReceiver() {
                 override fun onReceive(context: Context, intent: Intent) {
-                    when (intent.action) {
+                    val action = intent.action
+                    DebugLog.add(TAG, "commandReceiver onReceive: $action")
+                    when (action) {
                         "com.droidrun.portal.PROCESS_NL_COMMAND" -> {
                             val command = intent.getStringExtra("command")
-                            DebugLog.add(TAG, "Service received PROCESS_NL_COMMAND: '$command'")
                             if (command != null) {
+                                DebugLog.add(TAG, "Service received PROCESS_NL_COMMAND: '$command'")
                                 processNaturalLanguageCommand(command)
                             }
                         }
@@ -110,55 +145,45 @@ class DroidrunPortalService : AccessibilityService() {
                                 processVoiceCommand(command)
                             }
                         }
-                        "com.droidrun.portal.EXECUTE_UI_ACTION" -> {
-                            executeUIAction(intent)
+                        // Removed case for ACTION_TOGGLE_FLOATING_VOICE_BUTTON
+                        // ACTION_TOGGLE_FLOATING_VOICE_BUTTON -> {
+                        //     val show = intent.getBooleanExtra("show_button", false)
+                        //     if (show) showFloatingVoiceButton() else hideFloatingVoiceButton()
+                        // }
+                        MainActivity.ACTION_UPDATE_OVERLAY_OFFSET -> {
+                            val offsetValue = intent.getIntExtra(MainActivity.EXTRA_OVERLAY_OFFSET, MainActivity.DEFAULT_OFFSET)
+                            DebugLog.add(TAG, "Received ACTION_UPDATE_OVERLAY_OFFSET, new offset: $offsetValue")
+                            if (::overlayManager.isInitialized) {
+                                overlayManager.setPositionOffsetY(offsetValue)
+                            } else {
+                                DebugLog.add(TAG, "OverlayManager not initialized, cannot set offset.")
+                            }
                         }
-                        // Original ADB commands
-                        ACTION_GET_ELEMENTS -> {
-                            Log.e("DROIDRUN_RECEIVER", "Received GET_ELEMENTS command")
-                            broadcastElementData()
-                        }
-                        ACTION_GET_INTERACTIVE_ELEMENTS -> {
-                            Log.e("DROIDRUN_RECEIVER", "Received GET_INTERACTIVE_ELEMENTS command")
-                            broadcastElementData()
-                        }
-                        ACTION_GET_ALL_ELEMENTS -> {
-                            Log.e("DROIDRUN_RECEIVER", "Received GET_ALL_ELEMENTS command")
-                            broadcastAllElementsData()
+                        MainActivity.ACTION_UPDATE_OVERLAY_OFFSET_X -> {
+                            val offsetXValue = intent.getIntExtra(MainActivity.EXTRA_OVERLAY_OFFSET_X, MainActivity.DEFAULT_OFFSET_X)
+                            DebugLog.add(TAG, "Received ACTION_UPDATE_OVERLAY_OFFSET_X, new X-offset: $offsetXValue")
+                            if (::overlayManager.isInitialized) {
+                                overlayManager.setPositionOffsetX(offsetXValue)
+                            } else {
+                                DebugLog.add(TAG, "OverlayManager not initialized, cannot set X-offset for overlay.")
+                            }
                         }
                         ACTION_TOGGLE_OVERLAY -> {
-                            if (!isOverlayManagerAvailable()) {
-                                Log.e("DROIDRUN_RECEIVER", "Cannot toggle overlay: OverlayManager not initialized")
-                                return
-                            }
-                            
-                            val shouldShow = intent.getBooleanExtra(EXTRA_OVERLAY_VISIBLE, !overlayVisible)
-                            Log.e("DROIDRUN_RECEIVER", "Received TOGGLE_OVERLAY command: $shouldShow")
-                            if (shouldShow) {
-                                overlayManager.showOverlay()
-                                overlayVisible = true
-                            } else {
-                                overlayManager.hideOverlay()
-                                overlayVisible = false
-                            }
-                            val responseIntent = Intent(ACTION_ELEMENTS_RESPONSE).apply {
-                                putExtra(EXTRA_OVERLAY_VISIBLE, overlayVisible)
-                            }
-                            sendBroadcast(responseIntent)
-                        }
-                        ACTION_RETRIGGER_ELEMENTS -> {
-                            Log.e("DROIDRUN_RECEIVER", "Received RETRIGGER_ELEMENTS command")
-                            retriggerElements()
-                        }
-                        ACTION_FORCE_HIDE_OVERLAY -> {
-                            Log.e("DROIDRUN_RECEIVER", "Received FORCE_HIDE_OVERLAY command")
-                            if (isOverlayManagerAvailable()) {
-                                overlayManager.hideOverlay()
-                                overlayVisible = false
-                                overlayManager.clearElements()
-                                overlayManager.refreshOverlay()
+                            isOverlayVisuallyEnabledState = intent.getBooleanExtra(EXTRA_OVERLAY_VISIBLE, true)
+                            DebugLog.add(TAG, "Overlay visibility toggled: $isOverlayVisuallyEnabledState. Applying.")
+                            if (::overlayManager.isInitialized) {
+                                if (isOverlayVisuallyEnabledState) {
+                                    overlayManager.showOverlay()
+                                    pendingVisualizationUpdate = true // Mark for update
+                                    updateVisualizationIfNeeded() // Update immediately
+                                } else {
+                                    overlayManager.hideOverlay()
+                                }
                             }
                         }
+                        ACTION_GET_ELEMENTS -> broadcastElementData()
+                        ACTION_GET_ALL_ELEMENTS -> broadcastAllElementsData()
+                        ACTION_RETRIGGER_ELEMENTS -> retriggerElements()
                     }
                 }
             }
@@ -166,558 +191,839 @@ class DroidrunPortalService : AccessibilityService() {
             val filter = IntentFilter().apply {
                 addAction("com.droidrun.portal.PROCESS_NL_COMMAND")
                 addAction("com.droidrun.portal.PROCESS_VOICE_COMMAND")
-                addAction("com.droidrun.portal.EXECUTE_UI_ACTION")
-                addAction(ACTION_GET_ELEMENTS)
-                addAction(ACTION_GET_INTERACTIVE_ELEMENTS)
-                addAction(ACTION_GET_ALL_ELEMENTS)
+                // addAction(ACTION_TOGGLE_FLOATING_VOICE_BUTTON) // Removed
+                addAction(MainActivity.ACTION_UPDATE_OVERLAY_OFFSET)
+                addAction(MainActivity.ACTION_UPDATE_OVERLAY_OFFSET_X) // Added X-offset action
                 addAction(ACTION_TOGGLE_OVERLAY)
+                addAction(ACTION_GET_ELEMENTS)
+                addAction(ACTION_GET_ALL_ELEMENTS)
                 addAction(ACTION_RETRIGGER_ELEMENTS)
-                addAction(ACTION_FORCE_HIDE_OVERLAY)
-                addAction(ACTION_UPDATE_OVERLAY_OFFSET)
             }
-            registerReceiver(commandReceiver, filter, RECEIVER_EXPORTED)
+            val receiverFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Context.RECEIVER_EXPORTED else 0
+            registerReceiver(commandReceiver, filter, null, mainHandler, receiverFlags)
             
-            overlayManager = OverlayManager(this)
             isInitialized = true
             
-            val windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-            val display = windowManager.defaultDisplay
+            val localWindowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            @Suppress("DEPRECATION") // For defaultDisplay
+            val display = localWindowManager.defaultDisplay
             val size = Point()
+            @Suppress("DEPRECATION") // For getSize
             display.getSize(size)
             screenBounds.set(0, 0, size.x, size.y)
-            
-            startPeriodicUpdates()
-            startVisualizationUpdates()
+
+            val prefs = getSharedPreferences(MainActivity.PREFS_NAME, Context.MODE_PRIVATE)
+            isOverlayVisuallyEnabledState = prefs.getBoolean(MainActivity.KEY_OVERLAY_VISIBLE, true) // Use MainActivity's key
+            val currentYOffset = prefs.getInt(MainActivity.KEY_OVERLAY_OFFSET, MainActivity.DEFAULT_OFFSET)
+            overlayManager.setPositionOffsetY(currentYOffset)
+            val currentOffsetX = prefs.getInt(MainActivity.KEY_OVERLAY_OFFSET_X, MainActivity.DEFAULT_OFFSET_X)
+            overlayManager.setPositionOffsetX(currentOffsetX)
+            DebugLog.add(TAG, "Initial X-Offset set for OverlayManager: $currentOffsetX")
+
+            if (isOverlayVisuallyEnabledState) {
+                overlayManager.showOverlay()
+                mainHandler.postDelayed(processActiveWindowRunnable, 500)
+            } else {
+                overlayManager.hideOverlay()
+            }
+
+            mainHandler.postDelayed(updateOverlayVisualizationRunnable, REFRESH_INTERVAL_MS)
+            DebugLog.add(TAG, "onCreate: Service initialized. Overlay visible: $isOverlayVisuallyEnabledState, Y-Offset: $currentYOffset, X-Offset: $currentOffsetX")
+
         } catch (e: Exception) {
-            Log.e(TAG, "Error initializing service: ${e.message}", e)
+            DebugLog.add(TAG, "Error during service onCreate: ${e.message}")
+            Log.e(TAG, "Error initializing service", e)
         }
     }
 
     override fun onDestroy() {
-        Log.d(TAG, "Service onDestroy")
+        DebugLog.add(TAG, "onDestroy: Service shutting down.")
         try {
             if (::commandReceiver.isInitialized) {
                 unregisterReceiver(commandReceiver)
             }
-            
-            stopPeriodicUpdates()
-            mainHandler.removeCallbacks(visualizationRunnable)
-            resetOverlayState()
-            
-            if (isInitialized) {
+            // hideFloatingVoiceButton() // Removed
+            mainHandler.removeCallbacks(updateOverlayVisualizationRunnable)
+            mainHandler.removeCallbacks(processActiveWindowRunnable)
+            if (::overlayManager.isInitialized) {
                 overlayManager.hideOverlay()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error in onDestroy: ${e.message}", e)
+            DebugLog.add(TAG, "Error in onDestroy: ${e.message}")
         }
         super.onDestroy()
     }
 
-    // Gemini Integration Methods
     private fun processNaturalLanguageCommand(command: String) {
-        DebugLog.add(TAG, "New LPN command received: '$command'")
+        DebugLog.add(TAG, "processNaturalLanguageCommand: Received new command: '$command'")
+
         if (isProcessingMultiStep) {
-            DebugLog.add(TAG, "Warning: New command received while already processing a multi-step command ('${currentOriginalCommand}'). Overwriting.")
-            // Optionally, you might want to queue commands or disallow new ones until current finishes.
-            // For now, a new command interrupts and replaces the old one.
+            DebugLog.add(TAG, "StateReset: New command received while current command '${currentOriginalCommand ?: "N/A"}' is in progress. Resetting state for new command.")
+        } else {
+            DebugLog.add(TAG, "StateReset: Starting new command processing. Multi-step state was clear.")
         }
 
+        // Reliably reset all relevant states
         currentOriginalCommand = command
-        isProcessingMultiStep = true
-        pendingActionsQueue.clear() // Clear any actions from a previous command
-        currentRepromptAttempts = 0 // Reset re-prompt counter
+        DebugLog.add(TAG, "StateChange: currentOriginalCommand set to '$command'")
 
-        val currentElementsJson = getCurrentElementsJson()
-        lastKnownUiContext = currentElementsJson // Store context used for this command cycle
+        if (!isProcessingMultiStep) {
+            isProcessingMultiStep = true
+            DebugLog.add(TAG, "StateChange: isProcessingMultiStep set to true")
+        } else {
+            DebugLog.add(TAG, "StateInfo: isProcessingMultiStep remains true for new command.")
+        }
 
-        DebugLog.add(TAG, "Initiating Gemini processing for: '$command'")
-        geminiProcessor.processCommand(
-            command,
-            currentElementsJson,
-            object : GeminiCommandProcessor.CommandCallback {
-                override fun onActionsReady(actions: List<GeminiCommandProcessor.UIAction>, forCommand: String, uiContextUsed: String) {
-                    handleGeminiActions(actions, forCommand, uiContextUsed)
-                }
+        val oldQueueSize = pendingActionsQueue.size
+        if (oldQueueSize > 0) {
+            pendingActionsQueue.clear()
+            DebugLog.add(TAG, "StateChange: pendingActionsQueue cleared. Old size was $oldQueueSize")
+        } else {
+            DebugLog.add(TAG, "StateInfo: pendingActionsQueue was already empty.")
+        }
 
-                override fun onError(error: String) {
-                    DebugLog.add(TAG, "Gemini processing error for '$command': $error")
-                    isProcessingMultiStep = false
-                    currentOriginalCommand = null
-                }
-            }
-        )
+        currentRepromptAttempts = 0
+        DebugLog.add(TAG, "StateChange: currentRepromptAttempts reset to 0")
+
+        DebugLog.add(TAG, "processNaturalLanguageCommand: All states prepared for new command '$command'")
+
+        mainHandler.post { processActiveWindow() }
+        mainHandler.postDelayed({
+            val currentElementsJson = getCurrentElementsJson()
+            lastKnownUiContext = currentElementsJson
+            DebugLog.add(TAG, "Initiating Gemini request (INITIAL) for: '$command'. UI Hash: ${currentElementsJson.hashCode()}")
+            geminiProcessor.makeGeminiRequest(
+                GeminiCommandProcessor.PromptType.INITIAL,
+                command, currentElementsJson, null, null, geminiActionCallback
+            )
+        }, 250)
     }
 
     private fun handleGeminiActions(actions: List<GeminiCommandProcessor.UIAction>, forCommand: String, uiContextUsed: String) {
-        DebugLog.add(TAG, "Gemini actions ready for command '$forCommand' (UI context hash: ${uiContextUsed.hashCode()}): ${actions.size} actions.")
+        DebugLog.add(TAG, "handleGeminiActions: Received ${actions.size} actions for command '$forCommand'. UI context hash: ${uiContextUsed.hashCode()}.")
+
+        val oldQueueSize = pendingActionsQueue.size
+        if (oldQueueSize > 0) {
+            pendingActionsQueue.clear()
+            DebugLog.add(TAG, "StateChange: pendingActionsQueue cleared at start of handleGeminiActions. Old size: $oldQueueSize")
+        }
+
         if (!isProcessingMultiStep || forCommand != currentOriginalCommand) {
-            DebugLog.add(TAG, "Ignoring stale actions. Current command is '${currentOriginalCommand}'. Actions were for '${forCommand}'.")
+            DebugLog.add(TAG, "handleGeminiActions: Ignoring stale actions. isProcessingMultiStep: $isProcessingMultiStep (expected true), currentOriginalCommand: '${currentOriginalCommand ?: "null"}', actions were for: '$forCommand'.")
+            return
+        }
+
+        val finishAction = actions.firstOrNull { it.type.equals("finish", ignoreCase = true) }
+        if (finishAction != null) {
+            DebugLog.add(TAG, "handleGeminiActions: Received 'finish' action. Multi-step command '${currentOriginalCommand ?: "N/A"}' completed. Clearing states.")
+            if (isProcessingMultiStep) {
+                isProcessingMultiStep = false
+                DebugLog.add(TAG, "StateChange: isProcessingMultiStep set to false (finish action).")
+            }
+            if (currentOriginalCommand != null) {
+                currentOriginalCommand = null
+                DebugLog.add(TAG, "StateChange: currentOriginalCommand nulled (finish action).")
+            }
+            // pendingActionsQueue is already cleared at the beginning of this function.
+            // If not, it should be:
+            if (pendingActionsQueue.isNotEmpty()) {
+                 pendingActionsQueue.clear()
+                 DebugLog.add(TAG, "StateChange: pendingActionsQueue explicitly cleared (finish action).")
+            }
+            currentRepromptAttempts = 0
+            DebugLog.add(TAG, "StateChange: currentRepromptAttempts reset to 0 (finish action).")
             return
         }
 
         if (actions.isEmpty()) {
-            DebugLog.add(TAG, "Gemini returned no actions for '$forCommand'. Considering this step complete or stuck.")
-            // Check if we should stop or re-prompt
-            if (currentRepromptAttempts >= MAX_REPROMPT_ATTEMPTS) {
-                DebugLog.add(TAG, "Max re-prompt attempts reached. Ending multi-step command.")
-                isProcessingMultiStep = false
-                currentOriginalCommand = null
+            DebugLog.add(TAG, "handleGeminiActions: Gemini returned no actions for '$forCommand'. Current re-prompt attempts: $currentRepromptAttempts.")
+            if (currentRepromptAttempts < MAX_REPROMPT_ATTEMPTS) {
+                currentRepromptAttempts++
+                DebugLog.add(TAG, "StateChange: currentRepromptAttempts incremented to $currentRepromptAttempts.")
+                DebugLog.add(TAG, "handleGeminiActions: No actions from Gemini, attempting re-prompt (CONTINUATION_VALIDATE). Last UI Hash: ${lastKnownUiContext?.hashCode()}")
+                mainHandler.post { processActiveWindow() }
+                mainHandler.postDelayed({
+                    val newUiContext = getCurrentElementsJson()
+                    lastKnownUiContext = newUiContext
+                    DebugLog.add(TAG, "  Calling makeGeminiRequest (CONTINUATION_VALIDATE, empty actions case). OriginalCmd: '${currentOriginalCommand ?: "N/A"}'. Attempt: $currentRepromptAttempts. UI Hash: ${newUiContext.hashCode()}")
+                    geminiProcessor.makeGeminiRequest(
+                        GeminiCommandProcessor.PromptType.CONTINUATION_VALIDATE,
+                        currentOriginalCommand!!, newUiContext, null, null, geminiActionCallback
+                    )
+                }, 200)
             } else {
-                DebugLog.add(TAG, "No actions, attempting re-prompt (attempt ${currentRepromptAttempts + 1}).")
-                currentRepromptAttempts++ // Increment before calling continue
-                mainHandler.postDelayed({ continueMultiStepCommand() }, 1000) // Delay before re-prompting
+                DebugLog.add(TAG, "handleGeminiActions: Max re-prompt attempts reached for empty actions. Ending multi-step command '${currentOriginalCommand ?: "N/A"}'. Clearing states.")
+                if (isProcessingMultiStep) {
+                    isProcessingMultiStep = false
+                    DebugLog.add(TAG, "StateChange: isProcessingMultiStep set to false (max re-prompts for empty actions).")
+                }
+                if (currentOriginalCommand != null) {
+                    currentOriginalCommand = null
+                    DebugLog.add(TAG, "StateChange: currentOriginalCommand nulled (max re-prompts for empty actions).")
+                }
+                // pendingActionsQueue is already empty or cleared at function start.
+                currentRepromptAttempts = 0 // Reset for next command
+                DebugLog.add(TAG, "StateChange: currentRepromptAttempts reset to 0 (max re-prompts for empty actions).")
             }
-            return
-        }
-
-        // Check for "finish" action
-        val finishAction = actions.firstOrNull { it.type.equals("finish", ignoreCase = true) }
-        if (finishAction != null) {
-            DebugLog.add(TAG, "Received 'finish' action. Multi-step command completed.")
-            isProcessingMultiStep = false
-            currentOriginalCommand = null
-            pendingActionsQueue.clear()
             return
         }
 
         pendingActionsQueue.addAll(actions)
-        DebugLog.add(TAG, "Added ${actions.size} actions to queue. Total queue size: ${pendingActionsQueue.size}")
-
-        // If not already processing (e.g. first set of actions), start processing queue.
-        // Or if it was processing, this might be a new set of actions from a re-prompt.
-        executeNextPendingAction()
+        DebugLog.add(TAG, "StateChange: Added ${actions.size} actions to queue for '$currentOriginalCommand'. New total: ${pendingActionsQueue.size}")
+        executeNextValidActionFromQueue()
     }
 
-    private fun executeNextPendingAction() {
+    private fun executeNextValidActionFromQueue() {
+        DebugLog.add(TAG, "executeNextValidActionFromQueue. isProcessingMultiStep: $isProcessingMultiStep, Queue size: ${pendingActionsQueue.size}, Command: '${currentOriginalCommand ?: "N/A"}'")
         if (!isProcessingMultiStep) {
-            DebugLog.add(TAG, "executeNextPendingAction called but not processing multi-step.")
-            pendingActionsQueue.clear()
-            return
-        }
-
-        if (pendingActionsQueue.isEmpty()) {
-            DebugLog.add(TAG, "Action queue is empty. Need to re-prompt for '$currentOriginalCommand'.")
-            // This state should ideally be caught by handleGeminiActions or lead to continueMultiStepCommand for re-prompt
-            if (currentRepromptAttempts < MAX_REPROMPT_ATTEMPTS) {
-                 DebugLog.add(TAG, "Queue empty, attempting re-prompt (attempt ${currentRepromptAttempts + 1}).")
-                 currentRepromptAttempts++
-                 mainHandler.postDelayed({ continueMultiStepCommand() }, 1000)
-            } else {
-                DebugLog.add(TAG, "Max re-prompt attempts reached and queue empty. Ending multi-step command.")
-                isProcessingMultiStep = false
+            DebugLog.add(TAG, "executeNextValidActionFromQueue: Not processing multi-step. Clearing queue and command.")
+            val oldQueueSize = pendingActionsQueue.size
+            if (oldQueueSize > 0) {
+                pendingActionsQueue.clear()
+                DebugLog.add(TAG, "StateChange: pendingActionsQueue cleared (not processing multi-step). Old size: $oldQueueSize")
+            }
+            if (currentOriginalCommand != null) {
                 currentOriginalCommand = null
+                DebugLog.add(TAG, "StateChange: currentOriginalCommand nulled (not processing multi-step).")
+            }
+            // currentRepromptAttempts should ideally be 0 here or reset when isProcessingMultiStep becomes false.
+            // If isProcessingMultiStep became false, currentRepromptAttempts should have been reset
+            // when isProcessingMultiStep was set to false.
+            // Adding a log here if it's not 0, as it indicates a potential state mismatch.
+            if (currentRepromptAttempts != 0) {
+                DebugLog.add(TAG, "StateWarn: currentRepromptAttempts is $currentRepromptAttempts when !isProcessingMultiStep. Should ideally be 0.")
+                // Optionally reset it here again if strict safety is needed, though it implies a logic flaw elsewhere.
+                // currentRepromptAttempts = 0
+                // DebugLog.add(TAG, "StateChange: currentRepromptAttempts force reset to 0 (not processing multi-step cleanup).")
             }
             return
         }
+        if (pendingActionsQueue.isEmpty()) {
+            DebugLog.add(TAG, "executeNextValidActionFromQueue: Action queue empty for '${currentOriginalCommand ?: "N/A"}'. Current re-prompt attempts: $currentRepromptAttempts (Max: $MAX_REPROMPT_ATTEMPTS).")
+            if (currentRepromptAttempts < MAX_REPROMPT_ATTEMPTS) {
+                currentRepromptAttempts++
+                DebugLog.add(TAG, "StateChange: currentRepromptAttempts incremented to $currentRepromptAttempts.")
+                mainHandler.post { processActiveWindow() }
+                mainHandler.postDelayed({
+                    val newUiContext = getCurrentElementsJson()
+                    lastKnownUiContext = newUiContext
+                    DebugLog.add(TAG, "  Calling makeGeminiRequest (CONTINUATION_VALIDATE, empty queue). OriginalCmd: '${currentOriginalCommand ?: "N/A"}'. Attempt: $currentRepromptAttempts. UI Hash: ${newUiContext.hashCode()}")
+                    geminiProcessor.makeGeminiRequest(
+                        GeminiCommandProcessor.PromptType.CONTINUATION_VALIDATE,
+                        currentOriginalCommand!!, newUiContext, null, null, geminiActionCallback
+                    )
+                }, 200)
+            } else {
+                DebugLog.add(TAG, "executeNextValidActionFromQueue: Max re-prompt attempts and queue empty for '${currentOriginalCommand ?: "N/A"}'. Ending command. Clearing states.")
+                if (isProcessingMultiStep) {
+                    isProcessingMultiStep = false
+                    DebugLog.add(TAG, "StateChange: isProcessingMultiStep set to false (max re-prompts for empty queue).")
+                }
+                if (currentOriginalCommand != null) {
+                    currentOriginalCommand = null
+                    DebugLog.add(TAG, "StateChange: currentOriginalCommand nulled (max re-prompts for empty queue).")
+                }
+                currentRepromptAttempts = 0 // Reset for next command.
+                DebugLog.add(TAG, "StateChange: currentRepromptAttempts reset to 0 (max re-prompts for empty queue).")
+            }
+            return
+        }
+        val actionToExecute = pendingActionsQueue.removeFirst()
+        DebugLog.add(TAG, "StateChange: Removed action from queue. Old size: ${pendingActionsQueue.size + 1}, New size: ${pendingActionsQueue.size}")
+        DebugLog.add(TAG, "Executing action: ${actionToExecute.toString()}. For command: '$currentOriginalCommand'. Remaining in queue: ${pendingActionsQueue.size}")
 
-        val nextAction = pendingActionsQueue.removeFirst()
-        DebugLog.add(TAG, "Executing next action from queue: ${nextAction.type}. Remaining in queue: ${pendingActionsQueue.size}")
-        
-        // Clear the rest of pendingActionsQueue to force re-evaluation after this single action
-        // This ensures we always get fresh context from Gemini after every discrete step.
-        pendingActionsQueue.clear()
-        DebugLog.add(TAG, "Cleared pending actions queue to force re-evaluation after this action.")
+        executeAction(actionToExecute) // This is synchronous
 
-        executeAction(nextAction)
+        val delayMillis = if (actionToExecute.type.equals("click", ignoreCase = true)) {
+            DebugLog.add(TAG, "Post-action: 'click' detected, using longer delay (3s) for potential app load.")
+            3000L
+        } else {
+            1000L
+        }
 
-        // After action execution, schedule continuation (which will re-prompt due to empty queue)
+        // After action, re-evaluate by asking Gemini for next steps with new context
         mainHandler.postDelayed({
             if (isProcessingMultiStep) {
-                // Since queue is now empty, this will trigger re-prompt logic in continueMultiStepCommand
-                // or the start of executeNextPendingAction.
-                // For clarity, directly call continueMultiStepCommand for re-prompt.
-                if (currentRepromptAttempts < MAX_REPROMPT_ATTEMPTS) {
-                    DebugLog.add(TAG, "Action executed. Re-prompting (attempt ${currentRepromptAttempts + 1}).")
-                    currentRepromptAttempts++
-                    continueMultiStepCommand() // Call directly, no need for another postDelayed here if continueMultiStepCommand handles its own async call to Gemini
-                } else {
-                    DebugLog.add(TAG, "Max re-prompt attempts reached after action. Ending multi-step command.")
-                    isProcessingMultiStep = false
-                    currentOriginalCommand = null
-                }
+                DebugLog.add(TAG, "Post-action delay ($delayMillis ms) complete for '$currentOriginalCommand'. Requesting next step from Gemini (CONTINUATION_VALIDATE).")
+                mainHandler.post { processActiveWindow() }
+                mainHandler.postDelayed({
+                    val newUiContext = getCurrentElementsJson()
+                    lastKnownUiContext = newUiContext
+                    DebugLog.add(TAG, "  Calling makeGeminiRequest (CONTINUATION_VALIDATE, after action). LastAction: ${actionToExecute.type}, NextPlanned: ${pendingActionsQueue.firstOrNull()?.type ?: "null"}. UI Hash: ${newUiContext.hashCode()}")
+                    geminiProcessor.makeGeminiRequest(
+                        GeminiCommandProcessor.PromptType.CONTINUATION_VALIDATE,
+                        currentOriginalCommand!!, newUiContext, actionToExecute,
+                        pendingActionsQueue.firstOrNull(),
+                        geminiActionCallback
+                    )
+                }, 200) // This internal 200ms delay is for screen capture after processActiveWindow
+            } else {
+                 DebugLog.add(TAG, "Post-action delay ($delayMillis ms): No longer processing multi-step for '$currentOriginalCommand'. Not continuing.")
             }
-        }, 1000) // 1 second delay for UI to settle
-    }
-
-    private fun continueMultiStepCommand() {
-        DebugLog.add(TAG, "continueMultiStepCommand called. Current original command: '$currentOriginalCommand', isProcessing: $isProcessingMultiStep, Reprompt attempt: $currentRepromptAttempts / $MAX_REPROMPT_ATTEMPTS")
-
-        if (!isProcessingMultiStep) {
-            DebugLog.add(TAG, "Not in multi-step processing mode. Aborting continueMultiStepCommand.")
-            currentOriginalCommand = null // Ensure it's cleared
-            pendingActionsQueue.clear()
-            return
-        }
-
-        if (currentOriginalCommand == null) {
-            DebugLog.add(TAG, "Error: continueMultiStepCommand called with no original command. Aborting.")
-            isProcessingMultiStep = false
-            pendingActionsQueue.clear()
-            return
-        }
-
-        // Refresh UI context
-        // Note: processActiveWindow() updates visibleElements, getCurrentElementsJson() uses it.
-        // This needs to be on main thread if processActiveWindow() has UI interactions or specific thread requirements.
-        // For now, assuming it can be called here. If issues, may need to wrap in mainHandler.post.
-        processActiveWindow() // Make sure this captures the latest screen
-        val newUiContext = getCurrentElementsJson()
-
-        DebugLog.add(TAG, "New UI context captured (hash: ${newUiContext.hashCode()}). Comparing with last (hash: ${lastKnownUiContext?.hashCode()}).")
-
-        // Basic check to prevent loops if UI isn't changing and Gemini isn't finishing.
-        // More sophisticated checks could be added (e.g., if newUiContext is identical to lastKnownUiContext for X retries).
-        if (newUiContext == lastKnownUiContext && pendingActionsQueue.isEmpty()) {
-            // If UI is same and queue was emptied (meaning previous Gemini response didn't yield useful actions or finished its batch)
-            // This check is tricky; if an action *did* happen, UI *should* change. If it didn't, we might be stuck.
-            // The MAX_REPROMPT_ATTEMPTS should primarily handle infinite loops.
-            // This specific check might be too aggressive if Gemini legitimately returns no actions for a state.
-            // For now, primary reliance is on MAX_REPROMPT_ATTEMPTS managed in executeNextPendingAction/handleGeminiActions.
-            DebugLog.add(TAG, "UI context appears unchanged and queue is empty. Relying on MAX_REPROMPT_ATTEMPTS to break loops.")
-        }
-
-        lastKnownUiContext = newUiContext // Update for the next cycle
-
-        DebugLog.add(TAG, "Re-prompting Gemini for original command: '$currentOriginalCommand' with new UI context.")
-        geminiProcessor.processCommand(
-            currentOriginalCommand!!, // Known not null due to check above
-            newUiContext,
-            object : GeminiCommandProcessor.CommandCallback {
-                override fun onActionsReady(actions: List<GeminiCommandProcessor.UIAction>, forCommand: String, uiContextUsed: String) {
-                    handleGeminiActions(actions, forCommand, uiContextUsed)
-                }
-
-                override fun onError(error: String) {
-                    DebugLog.add(TAG, "Gemini processing error during continuation for '$currentOriginalCommand': $error")
-                    // Decide if we should stop or retry. For now, stop.
-                    isProcessingMultiStep = false
-                    currentOriginalCommand = null
-                }
-            }
-        )
+        }, delayMillis) // Use the new conditional delayMillis here
     }
     
     private fun processVoiceCommand(command: String) {
-        Log.d(TAG, "Processing voice command: $command")
+        DebugLog.add(TAG, "Processing voice command: '$command'")
         processNaturalLanguageCommand(command)
     }
-    
-    // private fun executeActions(actions: List<GeminiCommandProcessor.UIAction>) { // Replaced by queue processing
-    //     for (action in actions) {
-    //         executeAction(action)
-    //         Thread.sleep(500) // Small delay between actions
-    //     }
-    // }
-    
+
     private fun executeAction(action: GeminiCommandProcessor.UIAction) {
-        DebugLog.add(TAG, "Executing action: Type=${action.type}, Index=${action.elementIndex}, Text='${action.text}', XY=(${action.x},${action.y}), Dir='${action.direction}'")
-        when (action.type) {
-            "click" -> {
-                if (action.elementIndex >= 0) {
-                    clickElementByIndex(action.elementIndex)
-                } else if (action.x >= 0 && action.y >= 0) {
-                    clickAtCoordinates(action.x, action.y)
-                }
+        DebugLog.add(TAG, "executeAction: Type=${action.type}, Index=${action.elementIndex}, Text='${action.text}', XY=(${action.x},${action.y}), Dir='${action.direction}'")
+        // General try-catch for the when statement itself, though individual handlers will have their own.
+        try {
+            when (action.type.lowercase()) {
+                "click" -> handleActionClick(action)
+                "type" -> handleActionType(action)
+                "scroll" -> handleActionScroll(action)
+                "swipe" -> handleActionSwipe(action)
+                "home" -> handleActionHome()
+                "back" -> handleActionBack()
+                "recent" -> handleActionRecents()
+                "pinch_in" -> handleActionPinchIn()
+                "pinch_out" -> handleActionPinchOut()
+                "finish" -> DebugLog.add(TAG, "executeAction: Received 'finish' type, which should be handled by handleGeminiActions, not executeAction.")
+                else -> DebugLog.add(TAG, "executeAction: Unknown action type: ${action.type}")
             }
-            "type" -> {
-                if (action.elementIndex >= 0) {
-                    typeInElement(action.elementIndex, action.text)
-                }
-            }
-            "scroll" -> {
-                performScroll(action.direction)
-            }
-            "swipe" -> {
-                performSwipe(action.direction)
-            }
-            "home" -> {
-                performGlobalAction(GLOBAL_ACTION_HOME)
-                DebugLog.add(TAG, "Performed global action: HOME.")
-            }
-            "back" -> {
-                performGlobalAction(GLOBAL_ACTION_BACK)
-                DebugLog.add(TAG, "Performed global action: BACK.")
-            }
-            "recent" -> {
-                performGlobalAction(GLOBAL_ACTION_RECENTS)
-                DebugLog.add(TAG, "Performed global action: RECENTS.")
-            }
+        } catch (e: Exception) {
+            // This catch block is a fallback. Ideally, specific handlers catch their own errors.
+            DebugLog.add(TAG, "executeAction: Unexpected exception in top-level action dispatcher for action ${action.type}: ${e.message}")
+            Log.e(TAG, "executeAction: Unexpected exception for action $action", e)
         }
     }
-    
-    private fun executeUIAction(intent: Intent) {
-        val actionType = intent.getStringExtra("actionType") ?: return
-        val elementIndex = intent.getIntExtra("elementIndex", -1)
-        val text = intent.getStringExtra("text") ?: ""
-        val x = intent.getIntExtra("x", -1)
-        val y = intent.getIntExtra("y", -1)
-        val direction = intent.getStringExtra("direction") ?: ""
-        
-        val action = GeminiCommandProcessor.UIAction(actionType, elementIndex, text, x, y, direction)
-        executeAction(action)
+
+    private fun handleActionClick(action: GeminiCommandProcessor.UIAction) {
+        try {
+            if (action.elementIndex >= 0) {
+                clickElementByIndex(action.elementIndex)
+            } else if (action.x >= 0 && action.y >= 0) {
+                var adjustedX = action.x
+                if (::overlayManager.isInitialized) {
+                    val offsetX = overlayManager.getPositionOffsetX()
+                    adjustedX -= offsetX // Adjust for current X offset
+                    DebugLog.add(TAG, "handleActionClick: Adjusting click X-coordinate: original=${action.x}, offset=$offsetX, new=$adjustedX")
+                } else {
+                    DebugLog.add(TAG, "handleActionClick: OverlayManager not init for X-offset, using original X: ${action.x}")
+                }
+                clickAtCoordinates(adjustedX, action.y)
+            } else {
+                DebugLog.add(TAG, "handleActionClick: Click action invalid - no elementIndex or valid coordinates provided. Action: $action")
+            }
+        } catch (e: Exception) {
+            DebugLog.add(TAG, "handleActionClick: Exception for action $action: ${e.message}")
+            Log.e(TAG, "handleActionClick: Exception for action $action", e)
+        }
     }
-    
+
     private fun clickElementByIndex(index: Int) {
         val elements = getInteractiveElements()
-        if (index < elements.size) {
-            val element = elements[index]
-            element.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            Log.d(TAG, "Clicked element at index $index")
-            DebugLog.add(TAG, "Clicked element at index $index successfully.")
-        } else {
-            DebugLog.add(TAG, "Failed to click: Element index $index out of bounds (size: ${elements.size}).")
+        if (index < 0 || index >= elements.size) {
+            DebugLog.add(TAG, "clickElementByIndex: Failed to click - Element index $index out of bounds (size: ${elements.size}).")
+            return
         }
+        val nodeToClick = elements[index]
+
+        if (!nodeToClick.isVisibleToUser) {
+            DebugLog.add(TAG, "clickElementByIndex: Warning - Element at index $index (ID: ${nodeToClick.viewIdResourceName ?: "N/A"}, Text: '${nodeToClick.text}') is no longer visible.")
+            // Decide if to proceed or return. For now, proceeding as per subtask note.
+        }
+        if (!nodeToClick.isEnabled) {
+            DebugLog.add(TAG, "clickElementByIndex: Warning - Element at index $index (ID: ${nodeToClick.viewIdResourceName ?: "N/A"}, Text: '${nodeToClick.text}') is disabled.")
+            // Decide if to proceed or return.
+        }
+        if (!nodeToClick.isClickable) { // Redundant check if getInteractiveElements is perfect, but good for safety.
+            DebugLog.add(TAG, "clickElementByIndex: Warning - Element at index $index (ID: ${nodeToClick.viewIdResourceName ?: "N/A"}, Text: '${nodeToClick.text}') is not marked clickable by its properties (isClickable=${nodeToClick.isClickable}).")
+        }
+
+        DebugLog.add(TAG, "clickElementByIndex: Attempting to click element at index $index: ${nodeToClick.className} '${nodeToClick.text}', ID: ${nodeToClick.viewIdResourceName ?: "N/A"}")
+        nodeToClick.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        DebugLog.add(TAG, "clickElementByIndex: Click action performed for element at index $index.")
     }
     
     private fun clickAtCoordinates(x: Int, y: Int) {
-        val path = Path()
-        path.moveTo(x.toFloat(), y.toFloat())
-        
-        val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, 100))
-            .build()
-            
-        dispatchGesture(gesture, null, null)
-        Log.d(TAG, "Clicked at coordinates ($x, $y)")
+        DebugLog.add(TAG, "clickAtCoordinates: Attempting click at ($x, $y). Screen bounds: $screenBounds")
+        try {
+            val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
+            val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 100)).build()
+            val dispatched = dispatchGesture(gesture, null, null)
+            DebugLog.add(TAG, "clickAtCoordinates: dispatchGesture result: $dispatched at ($x, $y)")
+        } catch (e: Exception) {
+            DebugLog.add(TAG, "clickAtCoordinates: Exception dispatching click gesture at ($x, $y): ${e.message}")
+            Log.e(TAG, "clickAtCoordinates: Exception dispatching click", e)
+        }
     }
     
+    private fun handleActionType(action: GeminiCommandProcessor.UIAction) {
+        try {
+            if (action.elementIndex >= 0) {
+                typeInElement(action.elementIndex, action.text)
+            } else {
+                DebugLog.add(TAG, "handleActionType: Type action invalid - no elementIndex provided. Action: $action")
+            }
+        } catch (e: Exception) {
+            DebugLog.add(TAG, "handleActionType: Exception for action $action: ${e.message}")
+            Log.e(TAG, "handleActionType: Exception for action $action", e)
+        }
+    }
+
     private fun typeInElement(index: Int, text: String) {
         val elements = getInteractiveElements()
-        if (index < elements.size) {
-            val element = elements[index]
-            element.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-            val arguments = Bundle().apply {
-                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+        if (index < 0 || index >= elements.size) {
+            DebugLog.add(TAG, "typeInElement: Failed to type - Element index $index out of bounds (size: ${elements.size}).")
+            return
+        }
+        val nodeToTypeIn = elements[index]
+
+        if (!nodeToTypeIn.isVisibleToUser) {
+            DebugLog.add(TAG, "typeInElement: Warning - Element at index $index (ID: ${nodeToTypeIn.viewIdResourceName ?: "N/A"}, Text: '${nodeToTypeIn.text}') is no longer visible. Cannot type.")
+            return // Do not proceed if not visible
+        }
+        if (!nodeToTypeIn.isEnabled) {
+            DebugLog.add(TAG, "typeInElement: Warning - Element at index $index (ID: ${nodeToTypeIn.viewIdResourceName ?: "N/A"}, Text: '${nodeToTypeIn.text}') is disabled. Cannot type.")
+            return // Do not proceed if disabled
+        }
+        if (!nodeToTypeIn.isEditable) {
+            DebugLog.add(TAG, "typeInElement: Error - Element at index $index (ID: ${nodeToTypeIn.viewIdResourceName ?: "N/A"}, Text: '${nodeToTypeIn.text}') is not editable. Skipping type action.")
+            return // Crucial: Do not proceed if not editable
+        }
+
+        DebugLog.add(TAG, "typeInElement: Attempting to type '$text' in element at index $index: ID: ${nodeToTypeIn.viewIdResourceName ?: "N/A"}, Class: ${nodeToTypeIn.className}")
+
+        // Focus the element first
+        if (nodeToTypeIn.isFocusable) {
+            if (!nodeToTypeIn.isFocused) {
+                 DebugLog.add(TAG, "typeInElement: Element not focused. Attempting to set focus.")
+                 nodeToTypeIn.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+                 // Re-fetch the node or check focus state again if necessary, though performAction is often synchronous enough
             }
-            element.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-            Log.d(TAG, "Typed '$text' in element at index $index")
-            DebugLog.add(TAG, "Typed '$text' in element at index $index successfully.")
         } else {
-            DebugLog.add(TAG, "Failed to type: Element index $index out of bounds (size: ${elements.size}).")
+             DebugLog.add(TAG, "typeInElement: Warning - Element is not focusable, typing might fail or go to wrong field.")
+        }
+
+        val arguments = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
+        val success = nodeToTypeIn.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+        if (success) {
+            DebugLog.add(TAG, "typeInElement: Typed '$text' in element at index $index successfully.")
+        } else {
+            DebugLog.add(TAG, "typeInElement: Failed to type '$text' in element at index $index. ACTION_SET_TEXT returned false.")
         }
     }
     
+    private fun handleActionScroll(action: GeminiCommandProcessor.UIAction) {
+        try {
+            if (action.direction.isBlank()) {
+                DebugLog.add(TAG, "handleActionScroll: Scroll action invalid - no direction provided. Action: $action")
+                return
+            }
+            performScroll(action.direction)
+        } catch (e: Exception) {
+            DebugLog.add(TAG, "handleActionScroll: Exception for action $action: ${e.message}")
+            Log.e(TAG, "handleActionScroll: Exception for action $action", e)
+        }
+    }
+
     private fun performScroll(direction: String) {
-        val action = when (direction.lowercase()) {
+        // Called by handleActionScroll, error handling there.
+        DebugLog.add(TAG, "performScroll: Attempting scroll in direction: $direction")
+        // Using ACTION_SCROLL_BACKWARD for 'left' and ACTION_SCROLL_FORWARD for 'right'
+        // as general scroll actions. Specific left/right actions might have compatibility issues
+        // or not be universally supported by all views for horizontal scrolling via these constants.
+        // ACTION_SCROLL_FORWARD/BACKWARD are more commonly implemented for vertical or list scrolling,
+        // but can sometimes work for horizontal if the view is focused and designed for it.
+        val actionCode = when (direction.lowercase()) {
             "up" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
             "down" -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
-            else -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+            "left" -> AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD // Changed from ACTION_SCROLL_LEFT
+            "right" -> AccessibilityNodeInfo.ACTION_SCROLL_FORWARD // Changed from ACTION_SCROLL_RIGHT
+            else -> {
+                DebugLog.add(TAG, "performScroll: Unknown scroll direction: $direction. Not performing action.")
+                return
+            }
         }
-        
-        rootInActiveWindow?.performAction(action)
-        Log.d(TAG, "Performed scroll $direction")
-        DebugLog.add(TAG, "Performed scroll $direction.")
+
+        val currentRoot = rootInActiveWindow
+        if (currentRoot == null) {
+            DebugLog.add(TAG, "performScroll: Cannot scroll, rootInActiveWindow is null.")
+            return
+        }
+
+        val scrollableNode = findFirstScrollableNode(currentRoot)
+        if (scrollableNode != null) {
+            DebugLog.add(TAG, "performScroll: Found scrollable node ${scrollableNode.className}, attempting to scroll $direction.")
+            scrollableNode.performAction(actionCode)
+            DebugLog.add(TAG, "performScroll: Performed scroll $direction on specific node: ${scrollableNode.className}.")
+        } else {
+            DebugLog.add(TAG, "performScroll: No specific scrollable node found, attempting to scroll $direction on root window.")
+            currentRoot.performAction(actionCode) // May not always work if root itself is not scrollable in that direction
+            DebugLog.add(TAG, "performScroll: Performed scroll $direction on root window.")
+        }
+    }
+
+    private fun findFirstScrollableNode(rootNode: AccessibilityNodeInfo?): AccessibilityNodeInfo? { // Already robust for null rootNode
+        if (rootNode == null) {
+            DebugLog.add(TAG, "findFirstScrollableNode: rootNode is null, cannot find scrollable node.")
+            return null
+        }
+        val queue = LinkedList<AccessibilityNodeInfo>().apply { add(rootNode) }
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            if (node.isScrollable) {
+                DebugLog.add(TAG, "findFirstScrollableNode: Found scrollable node: ${node.className}")
+                return node
+            }
+            for (i in 0 until node.childCount) {
+                node.getChild(i)?.let { queue.addLast(it) }
+            }
+        }
+        DebugLog.add(TAG, "findFirstScrollableNode: No scrollable node found under the provided root.")
+        return null
+    }
+
+    private fun handleActionSwipe(action: GeminiCommandProcessor.UIAction) {
+        try {
+            if (action.direction.isBlank()) {
+                DebugLog.add(TAG, "handleActionSwipe: Swipe action invalid - no direction provided. Action: $action")
+                return
+            }
+            performSwipe(action.direction)
+        } catch (e: Exception) {
+            DebugLog.add(TAG, "handleActionSwipe: Exception for action $action: ${e.message}")
+            Log.e(TAG, "handleActionSwipe: Exception for action $action", e)
+        }
     }
     
     private fun performSwipe(direction: String) {
-        val displayMetrics = resources.displayMetrics
-        val width = displayMetrics.widthPixels
-        val height = displayMetrics.heightPixels
-        
-        val path = Path()
-        when (direction.lowercase()) {
-            "left" -> {
-                path.moveTo(width * 0.8f, height * 0.5f)
-                path.lineTo(width * 0.2f, height * 0.5f)
+        DebugLog.add(TAG, "performSwipe: Attempting swipe $direction")
+        try {
+            val displayMetrics = resources.displayMetrics
+            val width = displayMetrics.widthPixels
+            val height = displayMetrics.heightPixels
+            val path = Path()
+            val midX = width / 2f
+            val midY = height / 2f
+            val swipeLengthHorizontal = width / 3f // Example swipe length
+            val swipeLengthVertical = height / 3f // Example swipe length
+
+            when (direction.lowercase()) {
+                "left" -> { path.moveTo(midX + swipeLengthHorizontal / 2, midY); path.lineTo(midX - swipeLengthHorizontal / 2, midY) }
+                "right" -> { path.moveTo(midX - swipeLengthHorizontal / 2, midY); path.lineTo(midX + swipeLengthHorizontal / 2, midY) }
+                "up" -> { path.moveTo(midX, midY + swipeLengthVertical / 2); path.lineTo(midX, midY - swipeLengthVertical / 2) }
+                "down" -> { path.moveTo(midX, midY - swipeLengthVertical / 2); path.lineTo(midX, midY + swipeLengthVertical / 2) }
+                else -> {
+                    DebugLog.add(TAG, "performSwipe: Unknown swipe direction: $direction. Not performing action.")
+                    return
+                }
             }
-            "right" -> {
-                path.moveTo(width * 0.2f, height * 0.5f)
-                path.lineTo(width * 0.8f, height * 0.5f)
-            }
-            "up" -> {
-                path.moveTo(width * 0.5f, height * 0.8f)
-                path.lineTo(width * 0.5f, height * 0.2f)
-            }
-            "down" -> {
-                path.moveTo(width * 0.5f, height * 0.2f)
-                path.lineTo(width * 0.5f, height * 0.8f)
-            }
+            val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 200)).build() // 200ms duration
+            val dispatched = dispatchGesture(gesture, null, null)
+            DebugLog.add(TAG, "performSwipe: dispatchGesture result for $direction swipe: $dispatched")
+        } catch (e: Exception) {
+            DebugLog.add(TAG, "performSwipe: Exception dispatching $direction swipe: ${e.message}")
+            Log.e(TAG, "performSwipe: Exception for $direction swipe", e)
         }
-        
-        val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, 300))
-            .build()
-            
-        dispatchGesture(gesture, null, null)
-        Log.d(TAG, "Performed swipe $direction")
-        DebugLog.add(TAG, "Performed swipe $direction.")
     }
-    
-    private fun getCurrentElementsJson(): String {
-        return getElementsAsJson(false) // false for interactive elements only
+
+    private fun handleActionHome() {
+        DebugLog.add(TAG, "handleActionHome: Attempting to perform GLOBAL_ACTION_HOME")
+        try {
+            val success = performGlobalAction(GLOBAL_ACTION_HOME)
+            DebugLog.add(TAG, "handleActionHome: GLOBAL_ACTION_HOME success: $success")
+        } catch (e: Exception) {
+            DebugLog.add(TAG, "handleActionHome: Exception performing GLOBAL_ACTION_HOME: ${e.message}")
+            Log.e(TAG, "handleActionHome: Exception", e)
+        }
     }
+
+    private fun handleActionBack() {
+        DebugLog.add(TAG, "handleActionBack: Attempting to perform GLOBAL_ACTION_BACK")
+        try {
+            val success = performGlobalAction(GLOBAL_ACTION_BACK)
+            DebugLog.add(TAG, "handleActionBack: GLOBAL_ACTION_BACK success: $success")
+        } catch (e: Exception) {
+            DebugLog.add(TAG, "handleActionBack: Exception performing GLOBAL_ACTION_BACK: ${e.message}")
+            Log.e(TAG, "handleActionBack: Exception", e)
+        }
+    }
+
+    private fun handleActionRecents() {
+        DebugLog.add(TAG, "handleActionRecents: Attempting to perform GLOBAL_ACTION_RECENTS")
+        try {
+            val success = performGlobalAction(GLOBAL_ACTION_RECENTS)
+            DebugLog.add(TAG, "handleActionRecents: GLOBAL_ACTION_RECENTS success: $success")
+        } catch (e: Exception) {
+            DebugLog.add(TAG, "handleActionRecents: Exception performing GLOBAL_ACTION_RECENTS: ${e.message}")
+            Log.e(TAG, "handleActionRecents: Exception", e)
+        }
+    }
+
+    private fun getCurrentElementsJson(): String = getElementsAsJson(false)
     
     private fun getInteractiveElements(): List<AccessibilityNodeInfo> {
         val elements = mutableListOf<AccessibilityNodeInfo>()
-        val rootNode = rootInActiveWindow ?: return elements
-        
-        fun traverseNode(node: AccessibilityNodeInfo) {
+        val root = rootInActiveWindow
+        if (root == null) {
+            DebugLog.add(TAG, "getInteractiveElements: rootInActiveWindow is null. Returning empty list.")
+            return elements
+        }
+        val queue: LinkedList<AccessibilityNodeInfo> = LinkedList()
+        root.let { queue.add(it) }
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
             if (node.isClickable || node.isCheckable || node.isEditable || node.isScrollable || node.isFocusable) {
                 elements.add(node)
             }
-            for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { traverseNode(it) }
-            }
+            for (i in 0 until node.childCount) { node.getChild(i)?.let { queue.addLast(it) } }
         }
-        
-        traverseNode(rootNode)
         return elements
     }
 
-    // Original DroidRun Portal methods (simplified for space)
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
-        val eventPackage = event.packageName?.toString() ?: ""
-        
-        if (eventPackage.isNotEmpty() && eventPackage != currentPackageName && currentPackageName.isNotEmpty()) {
-            resetOverlayState()
-        }
-        
-        if (eventPackage.isNotEmpty()) {
-            currentPackageName = eventPackage
-        }
-        
-        when (event.eventType) {
-            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
-            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
-                if (isInitialized) {
-                    processActiveWindow()
-                }
+        try {
+            val eventPackage = event.packageName?.toString() ?: ""
+            if (eventPackage.isNotEmpty() && eventPackage != currentPackageName) {
+                DebugLog.add(TAG, "onAccessibilityEvent: App context changed from '$currentPackageName' to '$eventPackage'.")
+                currentPackageName = eventPackage
             }
+
+            when (event.eventType) {
+                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+                AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
+                    handleRelevantAccessibilityEvent(event)
+                }
+                // Optionally handle other event types or log them:
+                // else -> DebugLog.add(TAG, "onAccessibilityEvent: Received unhandled event type: ${AccessibilityEvent.eventTypeToString(event.eventType)}")
+            }
+        } catch (e: Exception) {
+            DebugLog.add(TAG, "onAccessibilityEvent: Unexpected exception during event processing: ${e.message}")
+            Log.e(TAG, "onAccessibilityEvent: Exception", e)
         }
     }
 
-    override fun onInterrupt() {
-        Log.d(TAG, "Service interrupted")
+    private fun handleRelevantAccessibilityEvent(event: AccessibilityEvent) {
+        // This function encapsulates the logic previously directly in onAccessibilityEvent's when block.
+        // No try-catch here as the caller (onAccessibilityEvent) has one.
+        DebugLog.add(TAG, "handleRelevantAccessibilityEvent: Processing event type ${AccessibilityEvent.eventTypeToString(event.eventType)} for package ${event.packageName}")
+        if (isInitialized) {
+            mainHandler.removeCallbacks(processActiveWindowRunnable)
+            // Determine delay based on whether a multi-step operation is in progress.
+            // Shorter delay if not, to make UI feel more responsive for single commands.
+            // Longer delay if multi-step, to allow UI to settle after an action.
+            val delay = if (isProcessingMultiStep) 500L else 150L
+            mainHandler.postDelayed(processActiveWindowRunnable, delay)
+            DebugLog.add(TAG, "handleRelevantAccessibilityEvent: Scheduled processActiveWindow with delay: $delay ms (isProcessingMultiStep: $isProcessingMultiStep)")
+        } else {
+            DebugLog.add(TAG, "handleRelevantAccessibilityEvent: Skipped processing as service not initialized.")
+        }
     }
+
+    override fun onInterrupt() { DebugLog.add(TAG, "Service interrupted.") }
 
     private fun processActiveWindow() {
-        if (isProcessing.get()) return
-        
-        isProcessing.set(true)
+        if (isProcessingAccessibilityEvent.getAndSet(true)) {
+            DebugLog.add(TAG, "processActiveWindow: Already processing, skipping due to atomic lock.")
+            return
+        }
+        DebugLog.add(TAG, "processActiveWindow: Triggered.")
         try {
             val rootNode = rootInActiveWindow
             if (rootNode != null) {
-                val newElements = mutableListOf<ElementNode>()
-                extractElements(rootNode, newElements, 0)
-                
+                extractAndStoreVisibleElements(rootNode)
+            } else {
+                DebugLog.add(TAG, "processActiveWindow: rootInActiveWindow is null. No elements to extract.")
+                // Consider clearing visibleElements if root is null, depending on desired behavior
                 synchronized(visibleElements) {
-                    visibleElements.clear()
-                    visibleElements.addAll(newElements)
+                    if (visibleElements.isNotEmpty()) {
+                        DebugLog.add(TAG, "processActiveWindow: Clearing previously visible elements as root is now null.")
+                        visibleElements.clear()
+                        if (isOverlayVisuallyEnabledState) {
+                             pendingVisualizationUpdate = true
+                        }
+                    }
                 }
-                
-                pendingVisualizationUpdate = true
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error processing active window: ${e.message}", e)
+            DebugLog.add(TAG, "processActiveWindow: Unhandled exception: ${e.message}")
+            Log.e(TAG, "processActiveWindow: Unhandled exception", e)
         } finally {
-            isProcessing.set(false)
+            isProcessingAccessibilityEvent.set(false)
+            DebugLog.add(TAG, "processActiveWindow: Processing finished, lock released.")
         }
     }
 
-    private fun extractElements(node: AccessibilityNodeInfo, elements: MutableList<ElementNode>, depth: Int) {
+    private fun extractAndStoreVisibleElements(rootNode: AccessibilityNodeInfo) {
+        DebugLog.add(TAG, "extractAndStoreVisibleElements: Starting extraction from root: ${rootNode.className}")
+        try {
+            val newElements = mutableListOf<ElementNode>()
+            recursivelyExtractElements(rootNode, newElements, 0) // Renamed recursive helper
+
+            synchronized(visibleElements) {
+                visibleElements.clear()
+                visibleElements.addAll(newElements)
+                DebugLog.add(TAG, "extractAndStoreVisibleElements: ${newElements.size} elements extracted and stored. visibleElements updated.")
+            }
+
+            if (isOverlayVisuallyEnabledState) {
+                pendingVisualizationUpdate = true
+                // updateVisualizationIfNeeded() // Consider if immediate update is needed or periodic is fine
+                DebugLog.add(TAG, "extractAndStoreVisibleElements: Overlay update marked as pending.")
+            }
+        } catch (e: Exception) {
+            DebugLog.add(TAG, "extractAndStoreVisibleElements: Exception during element extraction: ${e.message}")
+            Log.e(TAG, "extractAndStoreVisibleElements: Exception", e)
+            // Optionally clear visibleElements here if extraction fails critically
+            // synchronized(visibleElements) { visibleElements.clear() }
+        }
+    }
+
+    // Renamed from extractElements to recursivelyExtractElements to avoid confusion with the new orchestrator
+    private fun recursivelyExtractElements(node: AccessibilityNodeInfo?, elements: MutableList<ElementNode>, depth: Int) {
+        if (node == null) {
+            // DebugLog.add(TAG, "recursivelyExtractElements: Encountered null node at depth $depth, skipping.")
+            return
+        }
         try {
             val rect = Rect()
             node.getBoundsInScreen(rect)
-            
-            if (rect.width() >= MIN_ELEMENT_SIZE && rect.height() >= MIN_ELEMENT_SIZE) {
-                val classNameStr = node.className?.toString() ?: ""
-                val textStr = node.text?.toString() ?: ""
-                val element = ElementNode(
-                    nodeInfo = node,
-                    rect = rect,
-                    text = textStr,
-                    className = classNameStr,
-                    windowLayer = depth,
-                    creationTime = System.currentTimeMillis(),
-                    id = ElementNode.createId(rect, classNameStr, textStr)
-                )
-                elements.add(element)
+
+            // Basic visibility and size checks
+            if (!node.isVisibleToUser || rect.width() < MIN_ELEMENT_SIZE || rect.height() < MIN_ELEMENT_SIZE) {
+                // DebugLog.add(TAG, "recursivelyExtractElements: Node not processed (invisible or too small): ${node.className}")
+                // Still recurse for children even if parent is not added
+                for (i in 0 until node.childCount) {
+                     node.getChild(i)?.let { recursivelyExtractElements(it, elements, depth + 1) }
+                }
+                return // Return after checking children of non-visible/small parent
             }
-            
+
+            val classNameStr = node.className?.toString() ?: "UnknownClass"
+            // Prioritize node.text for the 'text' field.
+            val mainText = node.text?.toString() ?: ""
+            val contentDescText = node.contentDescription?.toString()
+            val resourceId = node.viewIdResourceName?.toString()
+            val isPassword = node.isPassword
+            val hint = if (node.isEditable) node.hintText?.toString() else null
+
+            elements.add(ElementNode(
+                nodeInfo = node, // Keep original node for actions
+                rect = rect,
+                text = mainText, // Primary text from node.text
+                className = classNameStr,
+                windowLayer = depth, // Could be useful for overlay drawing order
+                creationTime = System.currentTimeMillis(),
+                id = ElementNode.createId(rect, classNameStr, mainText), // ID based on mainText
+                contentDescription = contentDescText,
+                resourceIdName = resourceId,
+                hintText = hint,
+                isPasswordInput = isPassword
+            ))
+            // DebugLog.add(TAG, "recursivelyExtractElements: Added element ${classNameStr} with text '${mainText}' at depth $depth")
+
             for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { child ->
-                    extractElements(child, elements, depth + 1)
+                node.getChild(i)?.let { childNode ->
+                    // Sanity check for child visibility before recursing, though isVisibleToUser on child is more reliable
+                    // if(childNode.isVisibleToUser) // This check is done at the beginning of the recursive call already
+                    recursivelyExtractElements(childNode, elements, depth + 1)
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error extracting element: ${e.message}")
+            // Log error for this specific node and continue with siblings/children if possible
+            DebugLog.add(TAG, "recursivelyExtractElements: Error extracting details for node ${node.className}: ${e.message}")
+            // Consider if we should Log.e for stack trace depending on severity / frequency
         }
     }
 
     private fun getElementsAsJson(includeAll: Boolean): String {
         val jsonArray = JSONArray()
         val elementsToProcess = synchronized(visibleElements) {
-            if (includeAll) {
-                visibleElements.toList()
-            } else {
-                visibleElements.filter { it.isClickable() || it.nodeInfo.isCheckable || it.nodeInfo.isEditable || it.nodeInfo.isScrollable || it.nodeInfo.isFocusable }
-            }
+            if (includeAll) visibleElements.toList()
+            else visibleElements.filter { it.isClickable() || it.nodeInfo.isCheckable || it.nodeInfo.isEditable || it.nodeInfo.isScrollable || it.nodeInfo.isFocusable }
         }
-        
         elementsToProcess.forEachIndexed { index, element ->
             val jsonObject = JSONObject().apply {
-                put("index", index)
-                put("text", element.text)
+                put("index", index) // This is the list index for Gemini, not related to ElementNode.overlayIndex
+                put("text", element.text) // Already using element.text which is node.text
                 put("class", element.className)
+                put("contentDescription", element.contentDescription ?: JSONObject.NULL)
+                put("resourceId", element.resourceIdName ?: JSONObject.NULL)
+                put("hintText", element.hintText ?: JSONObject.NULL)
+                put("isPassword", element.isPasswordInput)
                 put("clickable", element.isClickable())
                 put("checkable", element.nodeInfo.isCheckable)
                 put("editable", element.nodeInfo.isEditable)
                 put("scrollable", element.nodeInfo.isScrollable)
                 put("focusable", element.nodeInfo.isFocusable)
                 put("bounds", JSONObject().apply {
-                    put("left", element.rect.left)
-                    put("top", element.rect.top)
-                    put("right", element.rect.right)
-                    put("bottom", element.rect.bottom)
+                    put("left", element.rect.left); put("top", element.rect.top)
+                    put("right", element.rect.right); put("bottom", element.rect.bottom)
                 })
             }
             jsonArray.put(jsonObject)
         }
-        
         return jsonArray.toString()
     }
 
     private fun broadcastElementData() {
-        val elementsJson = getElementsAsJson(false)
-        val responseIntent = Intent(ACTION_ELEMENTS_RESPONSE).apply {
-            putExtra(EXTRA_ELEMENTS_DATA, elementsJson)
+        val intent = Intent(ACTION_ELEMENTS_RESPONSE).apply {
+            putExtra(EXTRA_ELEMENTS_DATA, getElementsAsJson(false))
+            setPackage(packageName) // Make broadcast explicit
         }
-        sendBroadcast(responseIntent)
-        Log.e("DROIDRUN_RECEIVER", "Broadcasted element data")
+        sendBroadcast(intent)
+        DebugLog.add(TAG, "Broadcasted element data (interactive only) explicitly to package $packageName.")
     }
 
     private fun broadcastAllElementsData() {
-        val allElementsJson = getElementsAsJson(true)
-        val responseIntent = Intent(ACTION_ELEMENTS_RESPONSE).apply {
-            putExtra(EXTRA_ALL_ELEMENTS_DATA, allElementsJson)
+        val intent = Intent(ACTION_ELEMENTS_RESPONSE).apply {
+            putExtra(EXTRA_ALL_ELEMENTS_DATA, getElementsAsJson(true))
+            setPackage(packageName) // Make broadcast explicit
         }
-        sendBroadcast(responseIntent)
-        Log.e("DROIDRUN_RECEIVER", "Broadcasted all elements data")
+        sendBroadcast(intent)
+        DebugLog.add(TAG, "Broadcasted all elements data explicitly to package $packageName.")
     }
 
     private fun retriggerElements() {
-        synchronized(visibleElements) {
-            val currentTime = System.currentTimeMillis()
-            visibleElements.forEach { it.creationTime = currentTime }
-        }
-        pendingVisualizationUpdate = true
+        DebugLog.add(TAG, "Retrigger elements called. Forcing a screen refresh/re-evaluation.")
+        processActiveWindow()
     }
 
-    private fun resetOverlayState() {
-        synchronized(visibleElements) {
-            visibleElements.clear()
+    private fun updateVisualizationIfNeeded() {
+        if (!isInitialized || !::overlayManager.isInitialized) {
+            DebugLog.add(TAG, "updateVisualizationIfNeeded: OverlayManager not available or service not initialized.")
+            return
         }
-        synchronized(displayedElements) {
-            displayedElements.clear()
+        if (!isOverlayVisuallyEnabledState) {
+            DebugLog.add(TAG, "updateVisualizationIfNeeded: Overlay not visually enabled, ensuring it's hidden.")
+            overlayManager.hideOverlay()
+            pendingVisualizationUpdate = false
+            return
         }
-        if (isOverlayManagerAvailable()) {
-            overlayManager.clearElements()
-            overlayManager.refreshOverlay()
-        }
-    }
 
-    private fun isOverlayManagerAvailable(): Boolean {
-        return isInitialized && ::overlayManager.isInitialized
+        overlayManager.showOverlay()
+        overlayManager.clearElements()
+
+        val elementsToDraw = synchronized(visibleElements) { visibleElements.toList() }
+
+        if (elementsToDraw.isEmpty()) {
+             DebugLog.add(TAG, "updateVisualizationIfNeeded: No visible elements to draw, overlay cleared.")
+        } else {
+            DebugLog.add(TAG, "updateVisualizationIfNeeded: Updating overlay with ${elementsToDraw.size} elements.")
+        }
+
+        for (element in elementsToDraw) {
+            val weight = element.calculateWeight()
+            if (weight > MIN_DISPLAY_WEIGHT) {
+                 val heatmapColor = calculateHeatmapColor(weight)
+                 overlayManager.addElement(
+                     rect = element.rect,
+                     type = element.className,
+                     text = element.text,
+                     depth = element.windowLayer,
+                     color = heatmapColor
+                 )
+            }
+        }
+        overlayManager.refreshOverlay()
+        pendingVisualizationUpdate = false
     }
 
     private fun calculateHeatmapColor(weight: Float): Int {
@@ -725,89 +1031,7 @@ class DroidrunPortalService : AccessibilityService() {
         val blue = (255 * (1 - weight)).toInt().coerceIn(0, 255)
         return Color.rgb(red, 0, blue)
     }
-
-    // Periodic update methods
-    private val updateRunnable = object : Runnable {
-        override fun run() {
-            if (isInitialized) {
-                val currentTime = System.currentTimeMillis()
-                val timeSinceLastDraw = currentTime - lastDrawTime
-                
-                if (timeSinceLastDraw >= MIN_FRAME_TIME_MS) {
-                    processActiveWindow()
-                    updateVisualizationIfNeeded()
-                    lastDrawTime = currentTime
-                }
-            }
-            mainHandler.postDelayed(this, REFRESH_INTERVAL_MS)
-        }
-    }
     
-    private val visualizationRunnable = object : Runnable {
-        override fun run() {
-            if (isInitialized) {
-                updateVisualizationIfNeeded()
-            }
-            mainHandler.postDelayed(this, REFRESH_INTERVAL_MS)
-        }
-    }
-
-    private fun startPeriodicUpdates() {
-        lastDrawTime = System.currentTimeMillis()
-        mainHandler.postDelayed(updateRunnable, REFRESH_INTERVAL_MS)
-    }
-    
-    private fun stopPeriodicUpdates() {
-        mainHandler.removeCallbacks(updateRunnable)
-    }
-    
-    private fun startVisualizationUpdates() {
-        mainHandler.postDelayed(visualizationRunnable, VISUALIZATION_REFRESH_MS)
-    }
-
-    private fun updateVisualizationIfNeeded() {
-        if (!isOverlayManagerAvailable() || visibleElements.isEmpty()) {
-            pendingVisualizationUpdate = false
-            return
-        }
-        
-        try {
-            val elementsToProcess = visibleElements.map { element -> 
-                Pair(element, element.calculateWeight())
-            }
-            
-            val weightSortedElements = elementsToProcess
-                .filter { (_, weight) -> weight > MIN_DISPLAY_WEIGHT }
-                .sortedByDescending { (_, weight) -> weight }
-            
-            if (!overlayVisible) {
-                pendingVisualizationUpdate = false
-                return
-            }
-            
-            if (overlayVisible) {
-                overlayManager.clearElements()
-                
-                for ((element, weight) in weightSortedElements) {
-                    val heatmapColor = calculateHeatmapColor(weight)
-                    
-                    overlayManager.addElement(
-                        rect = element.rect,
-                        type = "${element.className}", 
-                        text = element.text,
-                        depth = element.windowLayer,
-                        color = heatmapColor
-                    )
-                }
-                
-                overlayManager.refreshOverlay()
-            }
-            
-            pendingVisualizationUpdate = false
-        } catch (e: Exception) {
-            Log.e(TAG, "Error updating visualization: ${e.message}", e)
-            pendingVisualizationUpdate = true
-        }
-    }
+    // Removed showFloatingVoiceButton()
+    // Removed hideFloatingVoiceButton()
 }
-
