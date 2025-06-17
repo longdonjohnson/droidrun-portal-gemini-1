@@ -59,13 +59,27 @@ class GeminiCommandProcessor(private val context: Context) {
         val commonInstructions = "You are an Android UI automation assistant.\n" +
             "Current UI Elements (JSON format, 0-based index):\n$elements\n\n" +
             "Respond ONLY with a valid JSON array of actions, or a single JSON object for the 'finish' action.\n" +
-            "Each action in the array should be a JSON object with the following fields:\n" +
-            "- \"type\": (string) Action type, e.g., \"click\", \"type\", \"scroll\", \"swipe\", \"home\", \"back\", \"recent\", \"finish\".\n" +
-            "- \"elementIndex\": (int, optional) Index of the element to interact with.\n" +
+            "Each UI element in the JSON provided to you now includes these fields: 'text', 'className', 'contentDescription', 'resourceId', 'hintText', 'isPassword', 'clickable', 'checkable', 'editable', 'scrollable', 'focusable', and 'bounds'.\n" +
+            "Each action in your response array should be a JSON object with the following fields:\n" +
+            "- \"type\": (string) Action type. Supported types: \"click\", \"type\", \"scroll\", \"swipe\", \"pinch_in\", \"pinch_out\", \"home\", \"back\", \"recent\", \"finish\".\n" +
+            "- \"elementIndex\": (int, optional) Index of the element (from the provided UI elements JSON) to interact with. Not used for 'pinch_in', 'pinch_out', 'home', 'back', 'recent'.\n" +
             "- \"text\": (string, optional) Text to type for \"type\" actions.\n" +
-            "- \"x\": (int, optional) X-coordinate for screen interaction if elementIndex is not applicable.\n" +
-            "- \"y\": (int, optional) Y-coordinate for screen interaction if elementIndex is not applicable.\n" +
-            "- \"direction\": (string, optional) Direction for \"scroll\" or \"swipe\" actions (\"up\", \"down\", \"left\", \"right\").\n\n" +
+            "- \"x\": (int, optional) X-coordinate for screen interaction if elementIndex is not applicable (e.g., for coordinate-based clicks). Not used for pinch actions.\n" +
+            "- \"y\": (int, optional) Y-coordinate for screen interaction if elementIndex is not applicable. Not used for pinch actions.\n" +
+            "- \"direction\": (string, optional) Direction for \"scroll\" or \"swipe\" actions. Standard directions are \"up\", \"down\", \"left\", \"right\". These perform general full-screen swipes suitable for navigation or scrolling large areas.\n" +
+            "Understanding the new UI element fields for your reasoning:\n" +
+            "- \"resourceId\": (string, optional) The view's resource ID name (e.g., 'com.example.app:id/button_id'). Highly useful for precise targeting of static elements. If you are confident an element has a stable resourceId, prioritize referencing it in your reasoning, though your action should still use 'elementIndex' or coordinates.\n" +
+            "- \"contentDescription\": (string, optional) Accessibility label, often for icon buttons or elements where 'text' is not descriptive. Consider this for identifying such elements.\n" +
+            "- \"hintText\": (string, optional) Hint text displayed in an empty editable input field. Useful for identifying the purpose of input fields.\n" +
+            "- \"isPassword\": (boolean, optional) True if an editable element is a password input field.\n" +
+            "New gesture actions (experimental, operate on screen center, may not work in all contexts):\n" +
+            "- \"pinch_in\": Performs a two-finger pinch gesture towards the center of the screen to zoom out.\n" +
+            "- \"pinch_out\": Performs a two-finger pinch gesture away from the center of the screen to zoom in.\n\n" +
+            "Specific examples for common navigation tasks:\n" +
+            "- To open the app drawer: `{\"type\": \"swipe\", \"direction\": \"up\"}` (this performs a swipe from the bottom-center upwards).\n" +
+            "- To open the notification shade: `{\"type\": \"swipe\", \"direction\": \"down\"}` (this performs a swipe from the top-center downwards).\n" +
+            "- To navigate between home screens or pages: `{\"type\": \"swipe\", \"direction\": \"left\"}` (swipes right-to-left) or `{\"type\": \"swipe\", \"direction\": \"right\"}` (swipes left-to-right).\n" +
+            "- The `{\"type\": \"back\"}` action performs the system back navigation.\n\n" +
             "If the overall task is complete based on the current UI and instructions, respond with only the single action: {\"type\":\"finish\"}\n" +
             "Do not add any explanatory text, apologies, or any characters outside the JSON response itself."
 

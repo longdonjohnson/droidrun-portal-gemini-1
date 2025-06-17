@@ -480,6 +480,8 @@ class DroidrunPortalService : AccessibilityService() {
                 "home" -> handleActionHome()
                 "back" -> handleActionBack()
                 "recent" -> handleActionRecents()
+                "pinch_in" -> handleActionPinchIn()
+                "pinch_out" -> handleActionPinchOut()
                 "finish" -> DebugLog.add(TAG, "executeAction: Received 'finish' type, which should be handled by handleGeminiActions, not executeAction.")
                 else -> DebugLog.add(TAG, "executeAction: Unknown action type: ${action.type}")
             }
