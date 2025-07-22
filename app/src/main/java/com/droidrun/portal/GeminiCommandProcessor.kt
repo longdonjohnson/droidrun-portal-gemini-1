@@ -41,7 +41,10 @@ class GeminiCommandProcessor(private val context: Context) {
         val text: String = "",
         val x: Int = -1,
         val y: Int = -1,
-        val direction: String = ""
+        val direction: String = "",
+        val taps: Int = 1,
+        val points: List<Point> = emptyList(),
+        val edge: String = ""
     ) {
         override fun toString(): String {
             val parts = mutableListOf<String>()

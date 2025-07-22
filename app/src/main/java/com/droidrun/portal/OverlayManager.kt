@@ -27,6 +27,7 @@ class OverlayManager(private val context: Context) {
     private var elementIndexCounter = 0 // Counter to assign indexes to elements
     private val isOverlayReady = AtomicBoolean(false)
     private var onReadyCallback: (() -> Unit)? = null
+    private var onFloatingButtonTapListener: (() -> Unit)? = null
     
     private var positionOffsetY = -128 // Default offset value
     private var positionOffsetX = 0 // Default X offset to 0
@@ -86,6 +87,10 @@ class OverlayManager(private val context: Context) {
             DebugLog.add(TAG, "setOnReadyCallback: Overlay already ready, invoking callback immediately.")
             handler.post(callback)
         }
+    }
+
+    fun setOnFloatingButtonTapListener(listener: () -> Unit) {
+        onFloatingButtonTapListener = listener
     }
 
     fun showOverlay() {
@@ -351,6 +356,17 @@ class OverlayManager(private val context: Context) {
             setBackgroundColor(Color.TRANSPARENT)
             // Enable hardware acceleration
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
+
+            setOnTouchListener { _, event ->
+                if (event.action == MotionEvent.ACTION_DOWN) {
+                    val floatingButtonRect = Rect(width - 200, height - 200, width, height)
+                    if (floatingButtonRect.contains(event.x.toInt(), event.y.toInt())) {
+                        onFloatingButtonTapListener?.invoke()
+                        return@setOnTouchListener true
+                    }
+                }
+                return@setOnTouchListener false
+            }
         }
 
         override fun onDraw(canvas: Canvas) {

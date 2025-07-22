@@ -44,6 +44,12 @@ class DroidrunPortalService : AccessibilityService() {
         const val ACTION_GET_ALL_ELEMENTS = "com.droidrun.portal.GET_ALL_ELEMENTS"
         const val ACTION_GET_INTERACTIVE_ELEMENTS = "com.droidrun.portal.GET_INTERACTIVE_ELEMENTS"
         const val ACTION_FORCE_HIDE_OVERLAY = "com.droidrun.portal.FORCE_HIDE_OVERLAY"
+        const val ACTION_INSERT_ACTION = "com.droidrun.portal.INSERT_ACTION"
+        const val ACTION_REMOVE_ACTION = "com.droidrun.portal.REMOVE_ACTION"
+        const val ACTION_REORDER_ACTION = "com.droidrun.portal.REORDER_ACTION"
+        const val ACTION_PAUSE_TASK = "com.droidrun.portal.PAUSE_TASK"
+        const val ACTION_RESUME_TASK = "com.droidrun.portal.RESUME_TASK"
+        const val ACTION_FLOATING_BUTTON_TAPPED = "com.droidrun.portal.FLOATING_BUTTON_TAPPED"
         // ACTION_UPDATE_OVERLAY_OFFSET is defined in MainActivity
         // EXTRA_OVERLAY_OFFSET is defined in MainActivity
         const val EXTRA_ELEMENTS_DATA = "elements_data"
@@ -74,6 +80,15 @@ class DroidrunPortalService : AccessibilityService() {
     private val MAX_REPROMPT_ATTEMPTS = 5
     private var currentRepromptAttempts = 0
 
+    private enum class TaskState {
+        IDLE,
+        RUNNING,
+        PAUSED,
+        ERROR
+    }
+
+    private var taskState = TaskState.IDLE
+
     // Removed:
     // private var floatingVoiceButton: View? = null
     // private lateinit var windowManagerService: WindowManager // Removed as it was only for FAB
@@ -99,6 +114,11 @@ class DroidrunPortalService : AccessibilityService() {
             // windowManagerService = getSystemService(WINDOW_SERVICE) as WindowManager // Removed
             geminiProcessor = GeminiCommandProcessor(this)
             overlayManager = OverlayManager(this)
+            overlayManager.setOnFloatingButtonTapListener {
+                val intent = Intent(ACTION_FLOATING_BUTTON_TAPPED)
+                intent.setPackage(packageName)
+                sendBroadcast(intent)
+            }
 
             geminiActionCallback = object : GeminiCommandProcessor.CommandCallback {
                 override fun onActionsReady(actions: List<GeminiCommandProcessor.UIAction>, forCommand: String, uiContextUsed: String) {
@@ -106,6 +126,8 @@ class DroidrunPortalService : AccessibilityService() {
                 }
                 override fun onError(error: String) {
                     DebugLog.add(TAG, "Gemini onError callback triggered. Original cmd: '${currentOriginalCommand ?: "N/A"}'. Error: $error. Resetting all relevant states.")
+
+                    taskState = TaskState.ERROR
 
                     if (isProcessingMultiStep) {
                         isProcessingMultiStep = false
@@ -184,6 +206,52 @@ class DroidrunPortalService : AccessibilityService() {
                         ACTION_GET_ELEMENTS -> broadcastElementData()
                         ACTION_GET_ALL_ELEMENTS -> broadcastAllElementsData()
                         ACTION_RETRIGGER_ELEMENTS -> retriggerElements()
+                        ACTION_INSERT_ACTION -> {
+                            val actionJson = intent.getStringExtra("action")
+                            val index = intent.getIntExtra("index", -1)
+                            if (actionJson != null) {
+                                val action = GeminiCommandProcessor.UIAction(
+                                    type = JSONObject(actionJson).getString("type"),
+                                    elementIndex = JSONObject(actionJson).optInt("elementIndex", -1),
+                                    text = JSONObject(actionJson).optString("text", ""),
+                                    x = JSONObject(actionJson).optInt("x", -1),
+                                    y = JSONObject(actionJson).optInt("y", -1),
+                                    direction = JSONObject(actionJson).optString("direction", ""),
+                                    taps = JSONObject(actionJson).optInt("taps", 1)
+                                )
+                                if (index >= 0 && index <= pendingActionsQueue.size) {
+                                    pendingActionsQueue.add(index, action)
+                                } else {
+                                    pendingActionsQueue.add(action)
+                                }
+                            }
+                        }
+                        ACTION_REMOVE_ACTION -> {
+                            val index = intent.getIntExtra("index", -1)
+                            if (index >= 0 && index < pendingActionsQueue.size) {
+                                pendingActionsQueue.removeAt(index)
+                            }
+                        }
+                        ACTION_REORDER_ACTION -> {
+                            val fromIndex = intent.getIntExtra("fromIndex", -1)
+                            val toIndex = intent.getIntExtra("toIndex", -1)
+                            if (fromIndex >= 0 && fromIndex < pendingActionsQueue.size &&
+                                toIndex >= 0 && toIndex < pendingActionsQueue.size) {
+                                val action = pendingActionsQueue.removeAt(fromIndex)
+                                pendingActionsQueue.add(toIndex, action)
+                            }
+                        }
+                        ACTION_PAUSE_TASK -> {
+                            taskState = TaskState.PAUSED
+                        }
+                        ACTION_RESUME_TASK -> {
+                            taskState = TaskState.RUNNING
+                            executeNextValidActionFromQueue()
+                        }
+                        ACTION_FLOATING_BUTTON_TAPPED -> {
+                            // For now, just log the event.
+                            DebugLog.add(TAG, "Floating button tapped.")
+                        }
                     }
                 }
             }
@@ -198,6 +266,12 @@ class DroidrunPortalService : AccessibilityService() {
                 addAction(ACTION_GET_ELEMENTS)
                 addAction(ACTION_GET_ALL_ELEMENTS)
                 addAction(ACTION_RETRIGGER_ELEMENTS)
+                addAction(ACTION_INSERT_ACTION)
+                addAction(ACTION_REMOVE_ACTION)
+                addAction(ACTION_REORDER_ACTION)
+                addAction(ACTION_PAUSE_TASK)
+                addAction(ACTION_RESUME_TASK)
+                addAction(ACTION_FLOATING_BUTTON_TAPPED)
             }
             val receiverFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Context.RECEIVER_EXPORTED else 0
             registerReceiver(commandReceiver, filter, null, mainHandler, receiverFlags)
@@ -256,6 +330,8 @@ class DroidrunPortalService : AccessibilityService() {
 
     private fun processNaturalLanguageCommand(command: String) {
         DebugLog.add(TAG, "processNaturalLanguageCommand: Received new command: '$command'")
+
+        taskState = TaskState.RUNNING
 
         if (isProcessingMultiStep) {
             DebugLog.add(TAG, "StateReset: New command received while current command '${currentOriginalCommand ?: "N/A"}' is in progress. Resetting state for new command.")
@@ -374,6 +450,10 @@ class DroidrunPortalService : AccessibilityService() {
     }
 
     private fun executeNextValidActionFromQueue() {
+        if (taskState != TaskState.RUNNING) {
+            DebugLog.add(TAG, "executeNextValidActionFromQueue: Task not running. State: $taskState")
+            return
+        }
         DebugLog.add(TAG, "executeNextValidActionFromQueue. isProcessingMultiStep: $isProcessingMultiStep, Queue size: ${pendingActionsQueue.size}, Command: '${currentOriginalCommand ?: "N/A"}'")
         if (!isProcessingMultiStep) {
             DebugLog.add(TAG, "executeNextValidActionFromQueue: Not processing multi-step. Clearing queue and command.")
@@ -461,6 +541,10 @@ class DroidrunPortalService : AccessibilityService() {
                  DebugLog.add(TAG, "Post-action delay ($delayMillis ms): No longer processing multi-step for '$currentOriginalCommand'. Not continuing.")
             }
         }, delayMillis) // Use the new conditional delayMillis here
+
+        mainHandler.postDelayed({
+            processActiveWindow()
+        }, delayMillis + 250)
     }
     
     private fun processVoiceCommand(command: String) {
@@ -482,6 +566,10 @@ class DroidrunPortalService : AccessibilityService() {
                 "recent" -> handleActionRecents()
                 "pinch_in" -> handleActionPinchIn()
                 "pinch_out" -> handleActionPinchOut()
+                "long_click" -> handleActionLongClick(action)
+                "multi_tap" -> handleActionMultiTap(action)
+                "touch_gesture" -> handleActionTouchBasedGesture(action)
+                "edge_gesture" -> handleActionEdgeGesture(action)
                 "finish" -> DebugLog.add(TAG, "executeAction: Received 'finish' type, which should be handled by handleGeminiActions, not executeAction.")
                 else -> DebugLog.add(TAG, "executeAction: Unknown action type: ${action.type}")
             }
@@ -756,6 +844,136 @@ class DroidrunPortalService : AccessibilityService() {
         }
     }
 
+    private fun handleActionLongClick(action: GeminiCommandProcessor.UIAction) {
+        try {
+            if (action.elementIndex >= 0) {
+                longClickElementByIndex(action.elementIndex)
+            } else if (action.x >= 0 && action.y >= 0) {
+                longClickAtCoordinates(action.x, action.y)
+            } else {
+                DebugLog.add(TAG, "handleActionLongClick: Long click action invalid - no elementIndex or valid coordinates provided. Action: $action")
+            }
+        } catch (e: Exception) {
+            DebugLog.add(TAG, "handleActionLongClick: Exception for action $action: ${e.message}")
+            Log.e(TAG, "handleActionLongClick: Exception for action $action", e)
+        }
+    }
+
+    private fun longClickElementByIndex(index: Int) {
+        val elements = getInteractiveElements()
+        if (index < 0 || index >= elements.size) {
+            DebugLog.add(TAG, "longClickElementByIndex: Failed to long click - Element index $index out of bounds (size: ${elements.size}).")
+            return
+        }
+        val nodeToLongClick = elements[index]
+        DebugLog.add(TAG, "longClickElementByIndex: Attempting to long click element at index $index: ${nodeToLongClick.className} '${nodeToLongClick.text}'")
+        nodeToLongClick.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)
+        DebugLog.add(TAG, "longClickElementByIndex: Long click action performed for element at index $index.")
+    }
+
+    private fun longClickAtCoordinates(x: Int, y: Int) {
+        DebugLog.add(TAG, "longClickAtCoordinates: Attempting long click at ($x, $y)")
+        val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
+        val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 500)).build()
+        dispatchGesture(gesture, null, null)
+    }
+
+    private fun handleActionMultiTap(action: GeminiCommandProcessor.UIAction) {
+        try {
+            if (action.elementIndex >= 0) {
+                multiTapElementByIndex(action.elementIndex, action.taps)
+            } else if (action.x >= 0 && action.y >= 0) {
+                multiTapAtCoordinates(action.x, action.y, action.taps)
+            } else {
+                DebugLog.add(TAG, "handleActionMultiTap: Multi-tap action invalid - no elementIndex or valid coordinates provided. Action: $action")
+            }
+        } catch (e: Exception) {
+            DebugLog.add(TAG, "handleActionMultiTap: Exception for action $action: ${e.message}")
+            Log.e(TAG, "handleActionMultiTap: Exception for action $action", e)
+        }
+    }
+
+    private fun multiTapElementByIndex(index: Int, taps: Int) {
+        val elements = getInteractiveElements()
+        if (index < 0 || index >= elements.size) {
+            DebugLog.add(TAG, "multiTapElementByIndex: Failed to multi-tap - Element index $index out of bounds (size: ${elements.size}).")
+            return
+        }
+        val nodeToMultiTap = elements[index]
+        val rect = Rect()
+        nodeToMultiTap.getBoundsInScreen(rect)
+        multiTapAtCoordinates(rect.centerX(), rect.centerY(), taps)
+    }
+
+    private fun multiTapAtCoordinates(x: Int, y: Int, taps: Int) {
+        DebugLog.add(TAG, "multiTapAtCoordinates: Attempting $taps taps at ($x, $y)")
+        val gestureBuilder = GestureDescription.Builder()
+        val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
+        for (i in 0 until taps) {
+            gestureBuilder.addStroke(GestureDescription.StrokeDescription(path, i * 150L, 100))
+        }
+        dispatchGesture(gestureBuilder.build(), null, null)
+    }
+
+    private fun handleActionTouchBasedGesture(action: GeminiCommandProcessor.UIAction) {
+        try {
+            if (action.points.isNotEmpty()) {
+                val path = Path()
+                path.moveTo(action.points[0].x.toFloat(), action.points[0].y.toFloat())
+                for (i in 1 until action.points.size) {
+                    path.lineTo(action.points[i].x.toFloat(), action.points[i].y.toFloat())
+                }
+                val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 500)).build()
+                dispatchGesture(gesture, null, null)
+            } else {
+                DebugLog.add(TAG, "handleActionTouchBasedGesture: Touch-based gesture invalid - no points provided. Action: $action")
+            }
+        } catch (e: Exception) {
+            DebugLog.add(TAG, "handleActionTouchBasedGesture: Exception for action $action: ${e.message}")
+            Log.e(TAG, "handleActionTouchBasedGesture: Exception for action $action", e)
+        }
+    }
+
+    private fun handleActionEdgeGesture(action: GeminiCommandProcessor.UIAction) {
+        try {
+            if (action.edge.isNotBlank()) {
+                val displayMetrics = resources.displayMetrics
+                val width = displayMetrics.widthPixels
+                val height = displayMetrics.heightPixels
+                val path = Path()
+                when (action.edge.lowercase()) {
+                    "left" -> {
+                        path.moveTo(0f, height / 2f)
+                        path.lineTo(width / 4f, height / 2f)
+                    }
+                    "right" -> {
+                        path.moveTo(width.toFloat(), height / 2f)
+                        path.lineTo(width * 3 / 4f, height / 2f)
+                    }
+                    "top" -> {
+                        path.moveTo(width / 2f, 0f)
+                        path.lineTo(width / 2f, height / 4f)
+                    }
+                    "bottom" -> {
+                        path.moveTo(width / 2f, height.toFloat())
+                        path.lineTo(width / 2f, height * 3 / 4f)
+                    }
+                    else -> {
+                        DebugLog.add(TAG, "handleActionEdgeGesture: Edge gesture invalid - unknown edge. Action: $action")
+                        return
+                    }
+                }
+                val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 200)).build()
+                dispatchGesture(gesture, null, null)
+            } else {
+                DebugLog.add(TAG, "handleActionEdgeGesture: Edge gesture invalid - no edge provided. Action: $action")
+            }
+        } catch (e: Exception) {
+            DebugLog.add(TAG, "handleActionEdgeGesture: Exception for action $action: ${e.message}")
+            Log.e(TAG, "handleActionEdgeGesture: Exception for action $action", e)
+        }
+    }
+
     private fun getCurrentElementsJson(): String = getElementsAsJson(false)
     
     private fun getInteractiveElements(): List<AccessibilityNodeInfo> {
@@ -855,7 +1073,7 @@ class DroidrunPortalService : AccessibilityService() {
         DebugLog.add(TAG, "extractAndStoreVisibleElements: Starting extraction from root: ${rootNode.className}")
         try {
             val newElements = mutableListOf<ElementNode>()
-            recursivelyExtractElements(rootNode, newElements, 0) // Renamed recursive helper
+            recursivelyExtractElements(rootNode, null, newElements, 0) // Renamed recursive helper
 
             synchronized(visibleElements) {
                 visibleElements.clear()
@@ -877,7 +1095,7 @@ class DroidrunPortalService : AccessibilityService() {
     }
 
     // Renamed from extractElements to recursivelyExtractElements to avoid confusion with the new orchestrator
-    private fun recursivelyExtractElements(node: AccessibilityNodeInfo?, elements: MutableList<ElementNode>, depth: Int) {
+    private fun recursivelyExtractElements(node: AccessibilityNodeInfo?, parentElement: ElementNode?, elements: MutableList<ElementNode>, depth: Int) {
         if (node == null) {
             // DebugLog.add(TAG, "recursivelyExtractElements: Encountered null node at depth $depth, skipping.")
             return
@@ -891,7 +1109,7 @@ class DroidrunPortalService : AccessibilityService() {
                 // DebugLog.add(TAG, "recursivelyExtractElements: Node not processed (invisible or too small): ${node.className}")
                 // Still recurse for children even if parent is not added
                 for (i in 0 until node.childCount) {
-                     node.getChild(i)?.let { recursivelyExtractElements(it, elements, depth + 1) }
+                     node.getChild(i)?.let { recursivelyExtractElements(it, parentElement, elements, depth + 1) }
                 }
                 return // Return after checking children of non-visible/small parent
             }
@@ -904,7 +1122,7 @@ class DroidrunPortalService : AccessibilityService() {
             val isPassword = node.isPassword
             val hint = if (node.isEditable) node.hintText?.toString() else null
 
-            elements.add(ElementNode(
+            val element = ElementNode(
                 nodeInfo = node, // Keep original node for actions
                 rect = rect,
                 text = mainText, // Primary text from node.text
@@ -915,15 +1133,19 @@ class DroidrunPortalService : AccessibilityService() {
                 contentDescription = contentDescText,
                 resourceIdName = resourceId,
                 hintText = hint,
-                isPasswordInput = isPassword
-            ))
+                isPasswordInput = isPassword,
+                parent = parentElement,
+                children = mutableListOf()
+            )
+            elements.add(element)
+            parentElement?.addChild(element)
             // DebugLog.add(TAG, "recursivelyExtractElements: Added element ${classNameStr} with text '${mainText}' at depth $depth")
 
             for (i in 0 until node.childCount) {
                 node.getChild(i)?.let { childNode ->
                     // Sanity check for child visibility before recursing, though isVisibleToUser on child is more reliable
                     // if(childNode.isVisibleToUser) // This check is done at the beginning of the recursive call already
-                    recursivelyExtractElements(childNode, elements, depth + 1)
+                    recursivelyExtractElements(childNode, element, elements, depth + 1)
                 }
             }
         } catch (e: Exception) {
