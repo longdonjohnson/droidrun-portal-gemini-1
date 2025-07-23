@@ -4,105 +4,143 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Base64
-import android.util.Log
+// Removed android.util.Log, using DebugLog instead
+import com.droidrun.portal.DebugLog // Added DebugLog import
 
 class PortalBroadcastReceiver : BroadcastReceiver() {
-    private val TAG = "PortalBroadcastReceiver"
+    private val TAG = "PortalReceiver" // Consistent TAG
     
     override fun onReceive(context: Context, intent: Intent) {
+        val action = intent.action ?: "null_action"
+        DebugLog.add(TAG, "onReceive: Received action: $action, from package: ${intent.component?.packageName ?: intent.getPackage() ?: "unknown"}")
+
         // Verify that the intent is from our own package for additional security
-        if (intent.component?.packageName != null && intent.component?.packageName != context.packageName) {
-            Log.w(TAG, "Received intent from unauthorized package: ${intent.component?.packageName}")
+        // Checking intent.package is more reliable for broadcasts not specifying a component
+        if (intent.getPackage() != null && intent.getPackage() != context.packageName) {
+            DebugLog.add(TAG, "onReceive: Intent from unauthorized package: ${intent.getPackage()}. Ignoring.")
             return
         }
         
-        when (intent.action) {
+        when (action) {
             "com.droidrun.portal.DROIDRUN_INPUT_B64" -> {
-                Log.d(TAG, "Received DROIDRUN_INPUT_B64 broadcast")
+                DebugLog.add(TAG, "onReceive: Handling DROIDRUN_INPUT_B64.")
                 handleBase64Input(context, intent)
             }
             "com.droidrun.portal.NATURAL_LANGUAGE_COMMAND" -> {
-                Log.d(TAG, "Received NATURAL_LANGUAGE_COMMAND broadcast")
+                DebugLog.add(TAG, "onReceive: Handling NATURAL_LANGUAGE_COMMAND.")
                 handleNaturalLanguageCommand(context, intent)
             }
             "com.droidrun.portal.VOICE_COMMAND" -> {
-                Log.d(TAG, "Received VOICE_COMMAND broadcast")
+                DebugLog.add(TAG, "onReceive: Handling VOICE_COMMAND.")
                 handleVoiceCommand(context, intent)
             }
             "com.droidrun.portal.EXECUTE_ACTION" -> {
-                Log.d(TAG, "Received EXECUTE_ACTION broadcast")
+                DebugLog.add(TAG, "onReceive: Handling EXECUTE_ACTION.")
                 handleExecuteAction(context, intent)
             }
             else -> {
-                Log.w(TAG, "Received unexpected action: ${intent.action}")
+                DebugLog.add(TAG, "onReceive: Received unexpected action: $action. No handler.")
             }
         }
     }
     
     private fun handleBase64Input(context: Context, intent: Intent) {
         val message = intent.getStringExtra("msg")
-        if (message != null && isValidBase64(message)) {
+        if (message == null) {
+            DebugLog.add(TAG, "handleBase64Input: Received null message for DROIDRUN_INPUT_B64. Discarding.")
+            return
+        }
+        DebugLog.add(TAG, "handleBase64Input: Received message (first 50 chars): ${message.take(50)}...")
+
+        if (isValidBase64(message)) {
             val forwardIntent = Intent("com.droidrun.portal.INTERNAL_INPUT_B64").apply {
-                putExtra("msg", message)
-                setPackage(context.packageName)
+                putExtra("msg", message) // Message is already confirmed not null
+                setPackage(context.packageName) // Ensure it targets our app
             }
             try {
                 context.sendBroadcast(forwardIntent)
-                Log.d(TAG, "Forwarded message to keyboard service")
+                DebugLog.add(TAG, "handleBase64Input: Forwarded valid Base64 message to INTERNAL_INPUT_B64 (Keyboard Service).")
             } catch (e: Exception) {
-                Log.e(TAG, "Error forwarding broadcast to keyboard service", e)
+                DebugLog.add(TAG, "handleBase64Input: Error forwarding broadcast to INTERNAL_INPUT_B64: ${e.message}")
+                // Log.e is fine for exceptions if DebugLog doesn't have specific exception logging
             }
         } else {
-            Log.w(TAG, "Received DROIDRUN_INPUT_B64 broadcast with invalid or no message")
+            // isValidBase64 already logs the error
+            DebugLog.add(TAG, "handleBase64Input: Received DROIDRUN_INPUT_B64 with invalid Base64 message. Not forwarding.")
         }
     }
     
     private fun handleNaturalLanguageCommand(context: Context, intent: Intent) {
         val command = intent.getStringExtra("command")
-        if (command != null) {
-            // Forward to accessibility service for processing
-            val serviceIntent = Intent("com.droidrun.portal.PROCESS_NL_COMMAND").apply {
-                putExtra("command", command)
-                setPackage(context.packageName)
-            }
+        if (command == null) {
+            DebugLog.add(TAG, "handleNaturalLanguageCommand: Received null command. Discarding.")
+            return
+        }
+        DebugLog.add(TAG, "handleNaturalLanguageCommand: Received command: '$command'")
+
+        val serviceIntent = Intent("com.droidrun.portal.PROCESS_NL_COMMAND").apply {
+            putExtra("command", command)
+            setPackage(context.packageName) // Target our app's service
+        }
+        try {
             context.sendBroadcast(serviceIntent)
-            Log.d(TAG, "Forwarded natural language command: $command")
+            DebugLog.add(TAG, "handleNaturalLanguageCommand: Forwarded NL command to PROCESS_NL_COMMAND (DroidrunPortalService): '$command'")
+        } catch (e: Exception) {
+            DebugLog.add(TAG, "handleNaturalLanguageCommand: Error forwarding NL command: ${e.message}")
         }
     }
     
     private fun handleVoiceCommand(context: Context, intent: Intent) {
         val command = intent.getStringExtra("command")
-        if (command != null) {
-            // Forward to accessibility service for processing
-            val serviceIntent = Intent("com.droidrun.portal.PROCESS_VOICE_COMMAND").apply {
-                putExtra("command", command)
-                setPackage(context.packageName)
-            }
+        if (command == null) {
+            DebugLog.add(TAG, "handleVoiceCommand: Received null voice command. Discarding.")
+            return
+        }
+        DebugLog.add(TAG, "handleVoiceCommand: Received voice command: '$command'")
+
+        val serviceIntent = Intent("com.droidrun.portal.PROCESS_VOICE_COMMAND").apply {
+            putExtra("command", command)
+            setPackage(context.packageName) // Target our app's service
+        }
+        try {
             context.sendBroadcast(serviceIntent)
-            Log.d(TAG, "Forwarded voice command: $command")
+            DebugLog.add(TAG, "handleVoiceCommand: Forwarded voice command to PROCESS_VOICE_COMMAND (DroidrunPortalService): '$command'")
+        } catch (e: Exception) {
+            DebugLog.add(TAG, "handleVoiceCommand: Error forwarding voice command: ${e.message}")
         }
     }
     
     private fun handleExecuteAction(context: Context, intent: Intent) {
         val actionType = intent.getStringExtra("actionType")
         val elementIndex = intent.getIntExtra("elementIndex", -1)
-        val text = intent.getStringExtra("text")
+        val text = intent.getStringExtra("text") // Default is null if not present
         val x = intent.getIntExtra("x", -1)
         val y = intent.getIntExtra("y", -1)
-        val direction = intent.getStringExtra("direction")
+        val direction = intent.getStringExtra("direction") // Default is null
+
+        DebugLog.add(TAG, "handleExecuteAction: Received actionType: $actionType, elementIndex: $elementIndex, text: '$text', x: $x, y: $y, direction: '$direction'")
         
-        // Forward to accessibility service for execution
+        // Basic validation: actionType should not be null
+        if (actionType == null) {
+            DebugLog.add(TAG, "handleExecuteAction: actionType is null. Cannot forward action. Discarding.")
+            return
+        }
+
         val serviceIntent = Intent("com.droidrun.portal.EXECUTE_UI_ACTION").apply {
-            putExtra("actionType", actionType)
+            putExtra("actionType", actionType) // Not null checked above
             putExtra("elementIndex", elementIndex)
-            putExtra("text", text)
+            if (text != null) putExtra("text", text)
             putExtra("x", x)
             putExtra("y", y)
-            putExtra("direction", direction)
-            setPackage(context.packageName)
+            if (direction != null) putExtra("direction", direction)
+            setPackage(context.packageName) // Target our app's service
         }
-        context.sendBroadcast(serviceIntent)
-        Log.d(TAG, "Forwarded action execution: $actionType")
+        try {
+            context.sendBroadcast(serviceIntent)
+            DebugLog.add(TAG, "handleExecuteAction: Forwarded action '$actionType' to EXECUTE_UI_ACTION (DroidrunPortalService).")
+        } catch (e: Exception) {
+             DebugLog.add(TAG, "handleExecuteAction: Error forwarding action '$actionType': ${e.message}")
+        }
     }
     
     private fun isValidBase64(input: String): Boolean {
@@ -110,7 +148,8 @@ class PortalBroadcastReceiver : BroadcastReceiver() {
             Base64.decode(input, Base64.DEFAULT)
             true
         } catch (e: IllegalArgumentException) {
-            Log.w(TAG, "Invalid base64 input received")
+            // Log specific error for invalid base64
+            DebugLog.add(TAG, "isValidBase64: Input string is not valid Base64. Error: ${e.message}")
             false
         }
     }

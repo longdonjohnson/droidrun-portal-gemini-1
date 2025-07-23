@@ -8,11 +8,13 @@ import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+// import android.util.Log // Replaced with DebugLog
+import com.droidrun.portal.DebugLog // Added DebugLog
 import android.view.Gravity
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.content.Intent
+import android.view.MotionEvent
 import android.view.View
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -26,8 +28,10 @@ class OverlayManager(private val context: Context) {
     private var elementIndexCounter = 0 // Counter to assign indexes to elements
     private val isOverlayReady = AtomicBoolean(false)
     private var onReadyCallback: (() -> Unit)? = null
+    private var onFloatingButtonTapListener: (() -> Unit)? = null
     
     private var positionOffsetY = -128 // Default offset value
+    private var positionOffsetX = 0 // Default X offset to 0
 
     companion object {
         private const val TAG = "TOPVIEW_OVERLAY"
@@ -57,27 +61,9 @@ class OverlayManager(private val context: Context) {
     
     // Add method to adjust the vertical offset
     fun setPositionOffsetY(offsetY: Int) {
+        DebugLog.add(TAG, "Setting positionOffsetY to: $offsetY (old value was ${this.positionOffsetY})")
         this.positionOffsetY = offsetY
-        // Redraw existing elements with the new offset
-        val existingElements = ArrayList(elementRects)
-        elementRects.clear()
-        
-        // Re-add elements with the updated offset
-        for (element in existingElements) {
-            val originalRect = Rect(element.rect)
-            // Adjust back to original position by removing the old offset
-            originalRect.offset(0, -positionOffsetY)
-            // Add again with new offset
-            addElement(
-                rect = originalRect,
-                type = element.type,
-                text = element.text,
-                depth = element.depth,
-                color = element.color
-            )
-        }
-        
-        refreshOverlay()
+        refreshOverlay() // This will redraw with the new Y offset applied in correctRectPosition
     }
     
     // Add getter for the current offset value
@@ -85,44 +71,67 @@ class OverlayManager(private val context: Context) {
         return positionOffsetY
     }
 
+    fun setPositionOffsetX(offsetX: Int) {
+        DebugLog.add(TAG, "Setting positionOffsetX to: $offsetX (old value was ${this.positionOffsetX})")
+        this.positionOffsetX = offsetX
+        refreshOverlay() // This will redraw with the new X offset applied in correctRectPosition
+    }
+
+    fun getPositionOffsetX(): Int {
+        return positionOffsetX
+    }
+
     fun setOnReadyCallback(callback: () -> Unit) {
+        DebugLog.add(TAG, "setOnReadyCallback: Callback being set. Overlay ready state: ${isOverlayReady.get()}")
         onReadyCallback = callback
-        // If already ready, call immediately
         if (isOverlayReady.get()) {
+            DebugLog.add(TAG, "setOnReadyCallback: Overlay already ready, invoking callback immediately.")
             handler.post(callback)
         }
     }
 
+    fun setOnFloatingButtonTapListener(listener: () -> Unit) {
+        onFloatingButtonTapListener = listener
+    }
+
     fun showOverlay() {
+        DebugLog.add(TAG, "showOverlay: Called. Current overlayView is ${if (overlayView == null) "null" else "not null"}.")
         if (overlayView != null) {
-            Log.d(TAG, "Overlay already exists, checking if it's attached")
+            DebugLog.add(TAG, "showOverlay: OverlayView already exists. Checking attachment state.")
             try {
-                // Check if the view is actually attached
-                overlayView?.parent ?: run {
-                    Log.w(TAG, "Overlay exists but not attached, recreating")
+                if (overlayView?.parent == null) {
+                    DebugLog.add(TAG, "showOverlay: OverlayView exists but not attached to window. Recreating.")
+                    try { windowManager.removeView(overlayView) } catch (e: Exception) { DebugLog.add(TAG, "showOverlay: Ignored error while removing defunct overlay: ${e.message}") }
                     overlayView = null
                     createAndAddOverlay()
-                    return
+                } else {
+                    DebugLog.add(TAG, "showOverlay: OverlayView already exists and is attached. Ensuring visibility and readiness.")
+                    overlayView?.visibility = View.VISIBLE
+                    if (!isOverlayReady.getAndSet(true)) {
+                         onReadyCallback?.let {
+                            DebugLog.add(TAG, "showOverlay: Overlay was not marked ready. Invoking onReadyCallback.")
+                            handler.post(it)
+                        }
+                    } else {
+                        DebugLog.add(TAG, "showOverlay: Overlay already marked ready.")
+                    }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error checking overlay state: ${e.message}", e)
+                DebugLog.add(TAG, "showOverlay: Error checking existing overlay state: ${e.message}. Recreating. Exception: ${e.toString()}")
                 overlayView = null
                 createAndAddOverlay()
-                return
             }
-            isOverlayReady.set(true)
-            onReadyCallback?.let { handler.post(it) }
             return
         }
+        // overlayView is null, proceed to create
         createAndAddOverlay()
     }
 
     private fun createAndAddOverlay() {
+        DebugLog.add(TAG, "createAndAddOverlay: Attempting to create and add new OverlayView.")
         try {
-            Log.d(TAG, "Creating new overlay")
             overlayView = OverlayView(context).apply {
-                // Set hardware acceleration
-                setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                setLayerType(View.LAYER_TYPE_HARDWARE, null) // Hardware acceleration
             }
             val params = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
@@ -145,25 +154,23 @@ class OverlayManager(private val context: Context) {
                     handler.postDelayed({
                         if (overlayView?.parent != null) {
                             isOverlayReady.set(true)
+                            DebugLog.add(TAG, "createAndAddOverlay: Delayed check: Overlay ready and callback invoked (if set).")
                             onReadyCallback?.let { it() }
                         } else {
-                            Log.e(TAG, "Overlay not properly attached after delay")
-                            // Try to recreate if not attached
+                            DebugLog.add(TAG, "createAndAddOverlay: Delayed check: Overlay not properly attached after delay. Attempting recovery. Exception: Overlay not attached")
                             hideOverlay()
                             showOverlay()
                         }
                     }, 500)
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error adding overlay: ${e.message}", e)
-                    // Clean up on failure
+                    DebugLog.add(TAG, "createAndAddOverlay: Error adding OverlayView to WindowManager: ${e.message}. Exception: ${e.toString()}")
                     overlayView = null
                     isOverlayVisible = false
                     isOverlayReady.set(false)
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error creating overlay: ${e.message}", e)
-            // Clean up on failure
+            DebugLog.add(TAG, "createAndAddOverlay: Error creating OverlayView instance: ${e.message}. Exception: ${e.toString()}")
             overlayView = null
             isOverlayVisible = false
             isOverlayReady.set(false)
@@ -174,154 +181,151 @@ class OverlayManager(private val context: Context) {
         handler.post {
             try {
                 overlayView?.let {
+                    DebugLog.add(TAG, "hideOverlay: Removing OverlayView from WindowManager.")
                     windowManager.removeView(it)
                     overlayView = null
+                    DebugLog.add(TAG, "hideOverlay: OverlayView removed and nulled successfully.")
                 }
                 isOverlayVisible = false
                 isOverlayReady.set(false)
-                Log.d(TAG, "Overlay removed")
+                DebugLog.add(TAG, "hideOverlay: Overlay state set to not visible and not ready.")
             } catch (e: Exception) {
-                Log.e(TAG, "Error removing overlay: ${e.message}", e)
+                DebugLog.add(TAG, "hideOverlay: Error removing OverlayView: ${e.message}. Exception: ${e.toString()}")
             }
         }
     }
 
     fun clearElements() {
+        DebugLog.add(TAG, "clearElements: Clearing ${elementRects.size} elements. Resetting index counter.")
         elementRects.clear()
-        elementIndexCounter = 0 // Reset the index counter when clearing elements
+        elementIndexCounter = 0
         refreshOverlay()
     }
 
     fun addElement(rect: Rect, type: String, text: String, depth: Int = 0, color: Int = Color.GREEN) {
-        // Apply position correction to the rectangle
         val correctedRect = correctRectPosition(rect)
         val index = elementIndexCounter++
-        // Assign a color from the color scheme based on the index
         val colorFromScheme = COLOR_SCHEME[index % COLOR_SCHEME.size]
-        elementRects.add(ElementInfo(correctedRect, type, text, depth, colorFromScheme, index))
-        // Don't refresh on each add to avoid excessive redraws with many elements
+        val newElement = ElementInfo(correctedRect, type, text, depth, colorFromScheme, index)
+        elementRects.add(newElement)
+        DebugLog.add(TAG, "addElement: Added new element (Index: $index, Type: $type, Text: '$text', Rect: $correctedRect, Depth: $depth, Color: $colorFromScheme). Total elements: ${elementRects.size}")
     }
     
-    // Correct the rectangle position to better match the actual UI element
     private fun correctRectPosition(rect: Rect): Rect {
         val correctedRect = Rect(rect)
-        
-        // Apply the vertical offset to shift the rectangle upward
-        correctedRect.offset(0, positionOffsetY)
-        
+        // Example of conditional logging if needed, but often direct logging is fine for DebugLog
+        // if (positionOffsetX != 0 || positionOffsetY != 0) {
+        //    DebugLog.add(TAG, "correctRectPosition: Original: $rect, OffsetX: $positionOffsetX, OffsetY: $positionOffsetY")
+        // }
+        correctedRect.offset(positionOffsetX, positionOffsetY)
+        // if (rect != correctedRect) {
+        //    DebugLog.add(TAG, "correctRectPosition: Corrected: $correctedRect")
+        // }
         return correctedRect
     }
 
     fun refreshOverlay() {
+        DebugLog.add(TAG, "refreshOverlay: Posting invalidate to handler. OverlayView is ${if (overlayView == null) "null" else "not null"}.")
         handler.post {
             if (overlayView == null) {
-                Log.e(TAG, "Cannot refresh overlay - view is null")
-                showOverlay()
+                DebugLog.add(TAG, "refreshOverlay: OverlayView is null. Attempting to show/recreate overlay first.")
+                showOverlay() // Attempt to recreate if null
             }
             overlayView?.invalidate()
         }
     }
 
-    // Update an existing element without changing its index
     fun updateElement(rect: Rect, text: String, color: Int = Color.GREEN) {
+        DebugLog.add(TAG, "updateElement: Attempting to update element. Input Rect: $rect, Text: '$text'")
         val correctedRect = correctRectPosition(rect)
         
-        // Try to find the existing element first
         val existingElement = elementRects.find { element ->
-            // Check if this is the same element by matching text and checking for significant overlap
             if (element.text == text) {
                 val overlapRect = Rect(element.rect)
                 if (overlapRect.intersect(correctedRect)) {
                     val overlapArea = overlapRect.width() * overlapRect.height()
                     val elementArea = element.rect.width() * element.rect.height()
                     val inputArea = correctedRect.width() * correctedRect.height()
-                    val minArea = minOf(elementArea, inputArea)
-                    
-                    // If rectangles have significant overlap (>50%), it's likely the same element
-                    minArea > 0 && overlapArea.toFloat() / minArea > 0.5f
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
+                    val minArea = minOf(elementArea, inputArea).toFloat()
+                    minArea > 0 && (overlapArea / minArea) > OVERLAP_THRESHOLD
+                } else false
+            } else false
         }
         
         if (existingElement != null) {
-            // Update the existing element's properties but keep its index
-            val index = existingElement.index
-            val elementIndex = elementRects.indexOf(existingElement)
-            if (elementIndex >= 0) {
-                // Use the existing color to maintain color consistency for the same element
-                elementRects[elementIndex] = ElementInfo(
+            DebugLog.add(TAG, "updateElement: Found existing element (Index: ${existingElement.index}). Updating its properties.")
+            val listIndex = elementRects.indexOf(existingElement)
+            if (listIndex >= 0) {
+                elementRects[listIndex] = ElementInfo(
                     rect = correctedRect,
-                    type = existingElement.type,
+                    type = existingElement.type, // Retain original type
                     text = text,
-                    depth = existingElement.depth,
-                    color = existingElement.color,
-                    index = index
+                    depth = existingElement.depth, // Retain original depth
+                    color = existingElement.color, // Retain original color for consistency
+                    index = existingElement.index  // IMPORTANT: Retain original index
                 )
+                DebugLog.add(TAG, "updateElement: Element at internal list index $listIndex updated.")
             }
         } else {
-            // If element doesn't exist, add it as a new element
-            val index = elementIndexCounter++
-            // Assign a color from the color scheme based on the index
-            val colorFromScheme = COLOR_SCHEME[index % COLOR_SCHEME.size]
+            DebugLog.add(TAG, "updateElement: No existing element found matching criteria. Adding as new element.")
+            val newIndex = elementIndexCounter++
+            val newColorFromScheme = COLOR_SCHEME[newIndex % COLOR_SCHEME.size]
             elementRects.add(ElementInfo(
                 rect = correctedRect,
-                type = "UpdatedElement",
+                type = "UpdatedElement", // Or a default type
                 text = text,
-                depth = 0,
-                color = colorFromScheme,
-                index = index
+                depth = 0, // Default depth
+                color = newColorFromScheme,
+                index = newIndex
             ))
+            DebugLog.add(TAG, "updateElement: Added new element (Index: $newIndex) due to no match.")
         }
     }
     
-    // Get the count of elements in the overlay
     fun getElementCount(): Int {
-        return elementRects.size
+        val count = elementRects.size
+        DebugLog.add(TAG, "getElementCount: Returning $count elements.")
+        return count
     }
 
-    // Modified getElementIndex with more lenient matching
     fun getElementIndex(rect: Rect, text: String): Int {
-        // Apply the same position correction that was applied when adding the element
         val correctedRect = correctRectPosition(rect)
+        DebugLog.add(TAG, "getElementIndex: Searching for element. CorrectedRect: $correctedRect, Text: '$text'")
         
-        // First try to find an exact match with the corrected rectangle
-        val exactMatch = elementRects.find { 
-            it.rect == correctedRect && it.text == text 
-        }
-        
+        val exactMatch = elementRects.find { it.rect == correctedRect && it.text == text }
         if (exactMatch != null) {
+            DebugLog.add(TAG, "getElementIndex: Found exact match. Index: ${exactMatch.index}")
             return exactMatch.index
+        } else {
+            DebugLog.add(TAG, "getElementIndex: No exact match found. Attempting looser matching.")
         }
         
-        // Try looser matching with lower overlap threshold
         val similarElement = elementRects.find { element ->
             val rectOverlaps = Rect.intersects(element.rect, correctedRect)
-            
-            // More lenient text matching
             val textMatches = element.text.trim() == text.trim()
             
-            if (rectOverlaps) {
+            if (rectOverlaps && textMatches) { // Ensure text matches before calculating overlap area for performance
                 val overlapRect = Rect(element.rect)
-                overlapRect.intersect(correctedRect)
+                overlapRect.intersect(correctedRect) // Modifies overlapRect to be the intersection
                 val overlapArea = overlapRect.width() * overlapRect.height()
                 val elementArea = element.rect.width() * element.rect.height()
                 val inputArea = correctedRect.width() * correctedRect.height()
-                val minArea = minOf(elementArea, inputArea)
                 
-                val hasSignificantOverlap = minArea > 0 && 
-                    overlapArea.toFloat() / minArea > OVERLAP_THRESHOLD
+                if (elementArea == 0 || inputArea == 0) return@find false // Avoid division by zero for zero-area rects
                 
-                hasSignificantOverlap && textMatches
+                val minArea = minOf(elementArea, inputArea).toFloat()
+                (overlapArea / minArea) > OVERLAP_THRESHOLD
             } else {
                 false
             }
         }
         
-        return similarElement?.index ?: -1
+        if (similarElement != null) {
+            DebugLog.add(TAG, "getElementIndex: Found similar element. Index: ${similarElement.index}")
+            return similarElement.index
+        }
+        DebugLog.add(TAG, "getElementIndex: No similar element found. Returning -1.")
+        return -1
     }
 
     inner class OverlayView(context: Context) : FrameLayout(context) {
@@ -353,56 +357,65 @@ class OverlayManager(private val context: Context) {
             setBackgroundColor(Color.TRANSPARENT)
             // Enable hardware acceleration
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
+
+            setOnTouchListener { _, event ->
+                if (event.action == MotionEvent.ACTION_DOWN) {
+                    val floatingButtonRect = Rect(width - 200, height - 200, width, height)
+                    if (floatingButtonRect.contains(event.x.toInt(), event.y.toInt())) {
+                        onFloatingButtonTapListener?.invoke()
+                        return@setOnTouchListener true
+                    }
+                }
+                return@setOnTouchListener false
+            }
         }
 
         override fun onDraw(canvas: Canvas) {
             try {
                 if (canvas == null) {
-                    Log.e(TAG, "Canvas is null in onDraw")
+                    DebugLog.add(TAG, "OverlayView.onDraw: Canvas is null. Cannot draw.")
+                    // Log.e(TAG, "OverlayView.onDraw: Canvas is null") // Replaced by DebugLog with exception
                     return
                 }
 
                 if (!isOverlayVisible) {
-                    Log.d(TAG, "Overlay not visible, skipping draw")
+                    DebugLog.add(TAG, "OverlayView.onDraw: Overlay not visible (isOverlayVisible=false), skipping draw.")
+                    return
+                } else if (overlayView == null || overlayView?.parent == null) { // Check if view is still valid
+                    DebugLog.add(TAG, "OverlayView.onDraw: OverlayView is null or not attached to window. Skipping draw.")
                     return
                 }
 
                 super.onDraw(canvas)
-                
-                val startTime = System.currentTimeMillis()
+                // val startTime = System.currentTimeMillis() // For performance timing
 
                 if (elementRects.isEmpty()) {
-                    if (isDebugging()) {
-                        drawDebugRect(canvas)
-                    }
+                    // DebugLog.add(TAG, "OverlayView.onDraw: No elements to draw.") // Can be noisy
+                    if (isDebugging()) drawDebugRect(canvas)
                     return
                 }
                 
-                // Create a local copy to prevent concurrent modification
-                val elementsToDraw = ArrayList(elementRects)
-                
-                // Sort elements by depth for drawing order
-                val sortedElements = elementsToDraw.sortedBy { it.depth }
+                val elementsToDraw = ArrayList(elementRects) // Local copy for thread safety
+                val sortedElements = elementsToDraw.sortedBy { it.depth } // Draw deeper elements first
                 
                 for (elementInfo in sortedElements) {
                     drawElement(canvas, elementInfo)
                 }
 
-                val drawTime = System.currentTimeMillis() - startTime
+                // val drawTime = System.currentTimeMillis() - startTime
+                // DebugLog.add(TAG, "OverlayView.onDraw: Draw completed in $drawTime ms for ${sortedElements.size} elements.") // Can be noisy
             } catch (e: Exception) {
-                Log.e(TAG, "Error in onDraw: ${e.message}", e)
+                DebugLog.add(TAG, "OverlayView.onDraw: Error during drawing: ${e.message}. Exception: ${e.toString()}")
             }
         }
 
         private fun drawElement(canvas: Canvas, elementInfo: ElementInfo) {
             try {
-                // Ensure the rectangle is valid
-                if (elementInfo.rect.width() <= 0 || elementInfo.rect.height() <= 0) {
-                    Log.w(TAG, "Invalid rectangle dimensions for element ${elementInfo.index}")
+                if (elementInfo.rect.width() <= 0 || elementInfo.rect.height() <= 0 || elementInfo.rect.left < 0 || elementInfo.rect.top < 0) {
+                    DebugLog.add(TAG, "OverlayView.drawElement: Invalid rectangle dimensions or position for element ${elementInfo.index}: ${elementInfo.rect}. Skipping draw for this element.")
                     return
                 }
 
-                // IMPORTANT: Set the color for this specific element 
                 val elementColor = elementInfo.color
                 
                 // Ensure color has full alpha for visibility
@@ -453,7 +466,7 @@ class OverlayManager(private val context: Context) {
                     textPaint
                 )
             } catch (e: Exception) {
-                Log.e(TAG, "Error drawing element ${elementInfo.index}: ${e.message}", e)
+                DebugLog.add(TAG, "OverlayView.drawElement: Error drawing element ${elementInfo.index} (Text: '${elementInfo.text}'): ${e.message}. Exception: ${e.toString()}")
             }
         }
 
@@ -461,20 +474,14 @@ class OverlayManager(private val context: Context) {
             try {
                 val screenWidth = width
                 val screenHeight = height
-                val testRect = Rect(
-                    screenWidth / 4,
-                    screenHeight / 4,
-                    (screenWidth * 3) / 4,
-                    (screenHeight * 3) / 4
-                )
+                val testRect = Rect(screenWidth / 4, screenHeight / 4, (screenWidth * 3) / 4, (screenHeight * 3) / 4)
                 boxPaint.color = Color.GREEN
                 canvas.drawRect(testRect, boxPaint)
-                Log.d(TAG, "Drew test rectangle at $testRect")
+                DebugLog.add(TAG, "OverlayView.drawDebugRect: Drew test rectangle at $testRect")
             } catch (e: Exception) {
-                Log.e(TAG, "Error drawing debug rectangle: ${e.message}", e)
+                DebugLog.add(TAG, "OverlayView.drawDebugRect: Error: ${e.message}. Exception: ${e.toString()}")
             }
         }
-        
         private fun isDebugging(): Boolean {
             return false // Set to true to show test rectangle
         }
