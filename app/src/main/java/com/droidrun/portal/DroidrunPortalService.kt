@@ -210,14 +210,25 @@ class DroidrunPortalService : AccessibilityService() {
                             val actionJson = intent.getStringExtra("action")
                             val index = intent.getIntExtra("index", -1)
                             if (actionJson != null) {
+                                val json = JSONObject(actionJson)
+                                val pointsList = mutableListOf<Point>()
+                                val pointsJson = json.optJSONArray("points")
+                                if (pointsJson != null) {
+                                    for (i in 0 until pointsJson.length()) {
+                                        val pointJson = pointsJson.getJSONObject(i)
+                                        pointsList.add(Point(pointJson.getInt("x"), pointJson.getInt("y")))
+                                    }
+                                }
                                 val action = GeminiCommandProcessor.UIAction(
-                                    type = JSONObject(actionJson).getString("type"),
-                                    elementIndex = JSONObject(actionJson).optInt("elementIndex", -1),
-                                    text = JSONObject(actionJson).optString("text", ""),
-                                    x = JSONObject(actionJson).optInt("x", -1),
-                                    y = JSONObject(actionJson).optInt("y", -1),
-                                    direction = JSONObject(actionJson).optString("direction", ""),
-                                    taps = JSONObject(actionJson).optInt("taps", 1)
+                                    type = json.getString("type"),
+                                    elementIndex = json.optInt("elementIndex", -1),
+                                    text = json.optString("text", ""),
+                                    x = json.optInt("x", -1),
+                                    y = json.optInt("y", -1),
+                                    direction = json.optString("direction", ""),
+                                    taps = json.optInt("taps", 1),
+                                    points = pointsList,
+                                    edge = json.optString("edge", "")
                                 )
                                 if (index >= 0 && index <= pendingActionsQueue.size) {
                                     pendingActionsQueue.add(index, action)
