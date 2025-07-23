@@ -5,7 +5,7 @@ import android.util.Log
 import com.droidrun.portal.DebugLog
 import kotlinx.coroutines.*
 import org.json.JSONArray
-import com.droidrun.portal.Point
+import android.graphics.Point
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.SocketTimeoutException

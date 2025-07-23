@@ -8,7 +8,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.PixelFormat
-import com.droidrun.portal.Point
+import android.graphics.Point
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Build
@@ -216,7 +216,7 @@ class DroidrunPortalService : AccessibilityService() {
                                 if (pointsJson != null) {
                                     for (i in 0 until pointsJson.length()) {
                                         val pointJson = pointsJson.getJSONObject(i)
-                                        pointsList.add(Point(pointJson.getInt("x"), pointJson.getInt("y")))
+                                        pointsList.add(Point(x = pointJson.getInt("x"), y = pointJson.getInt("y")))
                                     }
                                 }
                                 val action = GeminiCommandProcessor.UIAction(
@@ -943,6 +943,16 @@ class DroidrunPortalService : AccessibilityService() {
             DebugLog.add(TAG, "handleActionTouchBasedGesture: Exception for action $action: ${e.message}")
             Log.e(TAG, "handleActionTouchBasedGesture: Exception for action $action", e)
         }
+    }
+
+    private fun handleActionPinchIn() {
+        DebugLog.add(TAG, "handleActionPinchIn: Attempting to perform pinch in")
+        // Implementation to follow
+    }
+
+    private fun handleActionPinchOut() {
+        DebugLog.add(TAG, "handleActionPinchOut: Attempting to perform pinch out")
+        // Implementation to follow
     }
 
     private fun handleActionEdgeGesture(action: GeminiCommandProcessor.UIAction) {

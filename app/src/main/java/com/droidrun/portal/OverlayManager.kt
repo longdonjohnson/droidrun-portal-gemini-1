@@ -14,6 +14,7 @@ import android.view.Gravity
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.content.Intent
+import android.view.MotionEvent
 import android.view.View
 import java.util.concurrent.atomic.AtomicBoolean
 
