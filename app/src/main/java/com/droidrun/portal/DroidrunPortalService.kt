@@ -8,7 +8,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.PixelFormat
-import android.graphics.Point
+import com.droidrun.portal.Point
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Build
