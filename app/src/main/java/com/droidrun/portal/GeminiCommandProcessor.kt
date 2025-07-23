@@ -312,13 +312,24 @@ class GeminiCommandProcessor(private val context: Context) {
         if (type.isBlank()) {
             throw GeminiResponseParseException("Action type is blank in JSON object", problematicResponse = originalJsonText)
         }
+        val pointsList = mutableListOf<Point>()
+        val pointsJson = actionObj.optJSONArray("points")
+        if (pointsJson != null) {
+            for (i in 0 until pointsJson.length()) {
+                val pointJson = pointsJson.getJSONObject(i)
+                pointsList.add(Point(pointJson.getInt("x"), pointJson.getInt("y")))
+            }
+        }
         return UIAction(
             type = type,
             elementIndex = actionObj.optInt("elementIndex", -1),
             text = actionObj.optString("text", ""),
             x = actionObj.optInt("x", -1),
             y = actionObj.optInt("y", -1),
-            direction = actionObj.optString("direction", "")
+            direction = actionObj.optString("direction", ""),
+            taps = actionObj.optInt("taps", 1),
+            points = pointsList,
+            edge = actionObj.optString("edge", "")
         )
     }
 }
