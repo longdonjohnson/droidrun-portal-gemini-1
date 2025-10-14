@@ -1,7 +1,7 @@
 package com.droidrun.portal
 
 import android.content.Context
-import com.droidrun.portal.DebugLog // Added
+import com.droidrun.portal.DebugLog
 import android.util.Log
 import kotlinx.coroutines.*
 import org.json.JSONArray
@@ -9,9 +9,10 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
-class GeminiCommandProcessor(private val context: Context) {
+class GeminiCommandProcessor(private val context: Context) { // API key removed from constructor
     private val TAG = "GeminiCommandProcessor"
-    private val API_KEY = BuildConfig.GEMINI_API_KEY
+    // API key is now hardcoded as a private constant
+    private val API_KEY = "AIzaSyAk8PGkWMWtdpnmRZOCu-SRgWEaTrygCWQ"
     private val API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-computer-use-preview-10-2025:generateContent"
 
     interface CommandCallback {
@@ -80,6 +81,7 @@ class GeminiCommandProcessor(private val context: Context) {
 
     private suspend fun callGeminiAPI(prompt: String): String {
         return withContext(Dispatchers.IO) {
+            // The hardcoded API_KEY is used here
             val url = URL("$API_URL?key=$API_KEY")
             val connection = url.openConnection() as HttpURLConnection
 
@@ -107,7 +109,7 @@ class GeminiCommandProcessor(private val context: Context) {
             if (responseCode == HttpURLConnection.HTTP_OK) {
                 val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
                 DebugLog.add(TAG, "Gemini raw response: $responseBody")
-                responseBody // Return the stored responseBody
+                responseBody
             } else {
                 DebugLog.add(TAG, "Gemini API call failed with code: $responseCode, error: ${connection.errorStream?.bufferedReader()?.use { it.readText() }}")
                 throw Exception("API call failed with code: $responseCode")
@@ -124,9 +126,11 @@ class GeminiCommandProcessor(private val context: Context) {
             val text = parts.getJSONObject(0).getString("text")
             DebugLog.add(TAG, "Gemini response content text: $text")
 
-            // Extract JSON array from the text
             val jsonStart = text.indexOf('[')
             val jsonEnd = text.lastIndexOf(']') + 1
+            if (jsonStart == -1 || jsonEnd == 0) {
+                 throw Exception("No JSON array found in response text")
+            }
             val jsonText = text.substring(jsonStart, jsonEnd)
             DebugLog.add(TAG, "Extracted JSON text for parsing: $jsonText")
 
